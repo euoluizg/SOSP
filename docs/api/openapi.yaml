@@ -1,0 +1,2062 @@
+openapi: 3.0.3
+info:
+  title: SOSP — API de Orientação para Serviços Públicos
+  version: 1.1.0
+  description: |
+    Contrato REST do SOSP. Todas as rotas são versionadas em `/api/v1` e
+    respondem JSON. Erros seguem a RFC 7807 (Problem Details).
+
+    **Convenções**
+    - Paginação por offset nas listas: `page` (1-based) e `pageSize` (máximo 50).
+    - Feature flags: endpoints com `x-feature-flag` ficam desabilitados até a flag
+      ser ligada no ambiente. Mais detalhes em `docs/adr/ADR-007-feature-flags.md`.
+    - Busca do RF-06 retorna 10 itens por página por padrão.
+    - Operações mutáveis exigem `X-CSRFToken` e cookie de sessão.
+    - `Idempotency-Key` é obrigatório em criação de agendamento.
+    - Datas em `YYYY-MM-DD`; horários em `HH:MM`; timestamps em ISO 8601 UTC.
+  contact:
+    name: Equipe de Engenharia de Software — CESMAC
+    email: equipe.sosp@cesmac.edu.br
+  license:
+    name: Uso interno
+servers:
+  - url: https://sosp.gov.br/api/v1
+    description: Produção
+  - url: https://staging.sosp.gov.br/api/v1
+    description: Staging
+  - url: http://localhost:8000/api/v1
+    description: Desenvolvimento local
+
+tags:
+  - name: Auth
+    description: Cadastro, login CPF + senha, sessão e Gov.br (v2.0)
+  - name: Citizens
+    description: Perfil do cidadão autenticado
+  - name: Catalog
+    description: Serviços, órgãos, unidades e FAQ
+  - name: Search
+    description: Busca e ficha orientativa
+  - name: Guidance
+    description: Guia passo a passo e PDF
+  - name: Scheduling
+    description: Slots, agendamentos e protocolos
+  - name: Feedback
+    description: Avaliações e dúvidas
+  - name: Notifications
+    description: Preferências de notificação
+  - name: Reports
+    description: Relatórios gerenciais
+  - name: Integrations
+    description: Webhooks de provedores externos
+
+paths:
+  /auth/session:
+    get:
+      tags: [Auth]
+      summary: Retorna a sessão atual
+      operationId: getSession
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Sessão ativa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/govbr/authorize:
+    get:
+      tags: [Auth]
+      x-feature-flag: FEATURE_GOVBR_INTEGRATION_ENABLED
+      summary: Inicia o fluxo OIDC com o Gov.br (v2.0 — integração futura)
+      description: |
+        Endpoint condicionado por feature flag — retorna `404` enquanto
+        `FEATURE_GOVBR_INTEGRATION_ENABLED=false`.
+      operationId: authorizeGovbr
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          description: Rota interna para retorno após autenticar
+          schema:
+            type: string
+            pattern: '^/(servicos|meus-pedidos|protocolos)/'
+            example: /servicos/7f3c/agendar
+      responses:
+        '302':
+          description: Redireciona ao provedor Gov.br
+          headers:
+            Location:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/govbr/callback:
+    get:
+      tags: [Auth]
+      x-feature-flag: FEATURE_GOVBR_INTEGRATION_ENABLED
+      summary: Recebe o callback do Gov.br (v2.0 — integração futura)
+      description: |
+        Endpoint condicionado por feature flag — retorna `401` enquanto
+        `FEATURE_GOVBR_INTEGRATION_ENABLED=false`.
+      operationId: callbackGovbr
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Sessão criada e redirecionamento para a rota de origem
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Cria conta do cidadão com dados pessoais e senha
+      operationId: registerCitizen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CitizenRegistration'
+      responses:
+        '201':
+          description: Conta criada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitizenRegistrationResponse'
+        '409':
+          description: CPF ou e-mail já cadastrado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/internal/login:
+    post:
+      tags: [Auth]
+      summary: Login de servidor, administrador ou cidadão (CPF + senha)
+      description: |
+        No MVP, o login é unificado: cidadãos, servidores e administradores usam
+        CPF + senha. Este endpoint é mantido para compatibilidade com o back-office;
+        o endpoint `/auth/login` é o principal para o portal.
+      operationId: internalLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sessão criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: Credenciais inválidas
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Autentica cidadão ou servidor com CPF e senha
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf, password]
+              properties:
+                cpf:
+                  type: string
+                  description: CPF com ou sem máscara
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Sessão criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Conta temporariamente bloqueada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Encerra a sessão
+      operationId: logout
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Sessão encerrada
+
+  /auth/recover-password:
+    post:
+      tags: [Auth]
+      summary: Solicita código de recuperação de senha
+      operationId: recoverPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf, email]
+              properties:
+                cpf:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Código enviado se CPF e e-mail conferirem
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Redefine a senha com o código de recuperação
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf, code, newPassword]
+              properties:
+                cpf:
+                  type: string
+                code:
+                  type: string
+                  description: Código de 6 dígitos recebido por e-mail
+                newPassword:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Senha redefinida com sucesso
+        '401':
+          description: Código inválido ou expirado
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /citizens/me:
+    get:
+      tags: [Citizens]
+      summary: Retorna o perfil do cidadão autenticado
+      description: Requer sessão ativa (login com CPF + senha).
+      operationId: getCitizenProfile
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Perfil do titular
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitizenProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Citizens]
+      summary: Atualiza os dados de contato e endereço do cidadão
+      operationId: updateCitizenProfile
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CitizenProfileUpdate'
+      responses:
+        '200':
+          description: Perfil atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitizenProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /services:
+    get:
+      tags: [Search]
+      summary: Busca serviços com filtros e paginação
+      operationId: searchServices
+      description: |
+        Executa a busca do RF-06. O termo é normalizado (acentos e caixa) e
+        comparado por full-text e similaridade. Filtros são combinados por
+        interseção. Retorna 10 itens por página por padrão.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Palavra-chave. Vazio retorna todos os serviços ativos.
+          schema:
+            type: string
+            maxLength: 200
+            example: tirar rg
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/Category'
+        - name: agencyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: channel
+          in: query
+          schema:
+            $ref: '#/components/schemas/Channel'
+        - name: city
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+            example: Maceió
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Lista paginada de serviços
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /services/{serviceId}:
+    get:
+      tags: [Catalog]
+      summary: Retorna a ficha orientativa completa
+      operationId: getService
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Ficha do serviço
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{serviceId}/steps:
+    get:
+      tags: [Catalog]
+      summary: Lista as etapas do guia
+      operationId: listServiceSteps
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Etapas ordenadas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceStep'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{serviceId}/documents:
+    get:
+      tags: [Catalog]
+      summary: Lista os documentos exigidos
+      operationId: listServiceDocuments
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Documentos obrigatórios e opcionais
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceDocument'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{serviceId}/faq:
+    get:
+      tags: [Catalog]
+      summary: Lista o FAQ vinculado ao serviço
+      operationId: listServiceFaq
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Perguntas frequentes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FaqItem'
+
+  /agencies:
+    get:
+      tags: [Catalog]
+      summary: Lista órgãos ativos
+      operationId: listAgencies
+      parameters:
+        - name: sphere
+          in: query
+          schema:
+            type: string
+            enum: [municipal, state, federal]
+      responses:
+        '200':
+          description: Órgãos ativos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agency'
+
+  /units:
+    get:
+      tags: [Catalog]
+      summary: Lista unidades de atendimento
+      operationId: listUnits
+      parameters:
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: agencyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: serviceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unidades ativas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Unit'
+
+  /units/{unitId}/slots:
+    get:
+      tags: [Scheduling]
+      summary: Lista slots disponíveis de uma unidade
+      operationId: listSlots
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: serviceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: '2026-11-12'
+      responses:
+        '200':
+          description: Slots livres, em intervalos de 30 minutos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /categories:
+    get:
+      tags: [Catalog]
+      summary: Lista as categorias oficiais
+      operationId: listCategories
+      responses:
+        '200':
+          description: Categorias
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryOption'
+
+  /address/zipcode/{zipCode}:
+    get:
+      tags: [Catalog]
+      summary: Consulta endereço por CEP com fallback IBGE
+      operationId: lookupZipcode
+      parameters:
+        - name: zipCode
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9]{8}$'
+            example: '57020000'
+      responses:
+        '200':
+          description: Endereço encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ZipcodeAddress'
+        '404':
+          description: CEP não encontrado; retorna lista de municípios para preenchimento manual
+          content:
+            application/problem+json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Problem'
+                  - type: object
+                    properties:
+                      municipalities:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CityOption'
+
+  /services/{serviceId}/guidance:
+    get:
+      tags: [Guidance]
+      summary: Retorna o guia com o progresso do cidadão
+      operationId: getGuidance
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Guia e checklist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guidance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /services/{serviceId}/guidance/checklist:
+    put:
+      tags: [Guidance]
+      summary: Atualiza o checklist de documentos
+      operationId: updateChecklist
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checkedDocumentIds]
+              properties:
+                checkedDocumentIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Progresso atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guidance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /services/{serviceId}/guidance/pdf:
+    post:
+      tags: [Guidance]
+      summary: Solicita a geração assíncrona do PDF
+      operationId: requestGuidancePdf
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '202':
+          description: Job enfileirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PdfJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /guidance/pdf/{jobId}:
+    get:
+      tags: [Guidance]
+      summary: Consulta o status do PDF
+      operationId: getGuidancePdf
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Status do job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PdfJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /appointments:
+    post:
+      tags: [Scheduling]
+      summary: Cria um agendamento
+      operationId: createAppointment
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentCreate'
+      responses:
+        '201':
+          description: Agendamento criado com protocolo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Slot ocupado ou agendamento duplicado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /appointments/{appointmentId}:
+    get:
+      tags: [Scheduling]
+      summary: Retorna um agendamento
+      operationId: getAppointment
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: appointmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Agendamento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Scheduling]
+      summary: Remarca ou cancela um agendamento
+      operationId: updateAppointment
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: appointmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [reschedule, cancel]
+                scheduledDate:
+                  type: string
+                  format: date
+                scheduledTime:
+                  type: string
+                  pattern: '^([01][0-9]|2[0-3]):(00|30)$'
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Agendamento atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+        '409':
+          description: Prazo de 24 horas violado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /protocols:
+    get:
+      tags: [Scheduling]
+      summary: Lista os protocolos do cidadão
+      operationId: listProtocols
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProtocolStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Protocolos do titular
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProtocolList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /protocols/{protocolNumber}:
+    get:
+      tags: [Scheduling]
+      summary: Retorna a linha do tempo de um protocolo
+      operationId: getProtocol
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolNumber'
+      responses:
+        '200':
+          description: Protocolo com transições
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Protocol'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /protocols/{protocolNumber}/documents:
+    post:
+      tags: [Scheduling]
+      summary: Anexa documento solicitado
+      operationId: uploadProtocolDocument
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolNumber'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Arquivo recebido e em verificação
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Protocol'
+        '415':
+          description: Formato não aceito
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /protocols/{protocolNumber}/review:
+    post:
+      tags: [Feedback]
+      summary: Avalia um atendimento concluído (v2.0)
+      description: |
+        Registra a avaliação e o comentário do cidadão após o protocolo ser
+        concluído. Endpoint desligado por feature flag no MVP — retorna `404`
+        quando `FEATURE_REVIEWS_ENABLED=false`.
+      x-feature-flag: FEATURE_REVIEWS_ENABLED
+      operationId: createReview
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProtocolNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCreate'
+      responses:
+        '201':
+          description: Avaliação registrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '409':
+          description: Protocolo não concluído ou já avaliado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /questions:
+    post:
+      tags: [Feedback]
+      summary: Abre uma dúvida a partir do FAQ
+      operationId: createQuestion
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionCreate'
+      responses:
+        '201':
+          description: Protocolo do tipo Dúvida criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Protocol'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /notifications/preferences:
+    get:
+      tags: [Notifications]
+      summary: Lista as preferências de notificação (v2.0)
+      description: |
+        Endpoint condicionado por feature flag — retorna `403` quando
+        `FEATURE_NOTIFICATION_CENTER_ENABLED=false`. O MVP envia apenas
+        e-mail transacional dentro dos fluxos de RF-08/RF-09.
+      x-feature-flag: FEATURE_NOTIFICATION_CENTER_ENABLED
+      operationId: listNotificationPreferences
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Preferências por tipo e canal
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationPreference'
+    put:
+      tags: [Notifications]
+      summary: Atualiza as preferências de notificação (v2.0)
+      description: |
+        Endpoint condicionado por feature flag — retorna `403` quando
+        `FEATURE_NOTIFICATION_CENTER_ENABLED=false`.
+      x-feature-flag: FEATURE_NOTIFICATION_CENTER_ENABLED
+      operationId: updateNotificationPreferences
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/NotificationPreference'
+      responses:
+        '200':
+          description: Preferências atualizadas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationPreference'
+
+  /reports/appointments:
+    get:
+      tags: [Reports]
+      summary: Agendamentos por status no período
+      operationId: reportAppointments
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: agencyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: serviceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: unitId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Agregação por status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportAppointmentRow'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/exports:
+    post:
+      tags: [Reports]
+      summary: Solicita exportação CSV ou PDF
+      description: |
+        Solicita exportação assíncrona. A fila enfileira e o worker gera o
+        arquivo. Endpoint condicionado por feature flag — retorna `403` quando
+        `FEATURE_REPORTS_EXPORT=false`.
+      x-feature-flag: FEATURE_REPORTS_EXPORT
+      operationId: createReportExport
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportType, format, filters]
+              properties:
+                reportType:
+                  type: string
+                  enum: [topSearches, appointmentsByStatus, averageCompletionTime, reviewAverage]
+                format:
+                  type: string
+                  enum: [csv, pdf]
+                filters:
+                  type: object
+                  properties:
+                    from:
+                      type: string
+                      format: date
+                    to:
+                      type: string
+                      format: date
+                    agencyId:
+                      type: string
+                      format: uuid
+                    serviceId:
+                      type: string
+                      format: uuid
+                    unitId:
+                      type: string
+                      format: uuid
+      responses:
+        '202':
+          description: Exportação enfileirada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /webhooks/email:
+    post:
+      tags: [Integrations]
+      summary: Recebe eventos do provedor de e-mail
+      operationId: receiveEmailWebhook
+      description: |
+        Endpoint chamado pelo provedor de e-mail. A assinatura HMAC-SHA256 é
+        calculada sobre o corpo bruto e enviada em `X-Signature`; o timestamp
+        tem janela de 5 minutos para impedir replay. Eventos repetidos pelo
+        `eventId` retornam 200 sem reprocessar.
+      security:
+        - hmacSignature: []
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailEvent'
+      responses:
+        '200':
+          description: Evento aceito
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+      description: Sessão assinada, HttpOnly, Secure e SameSite=Lax.
+    hmacSignature:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: HMAC-SHA256 do corpo bruto, com janela de timestamp de 5 minutos.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 10
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProtocolNumber:
+      name: protocolNumber
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{8}-[0-9]{4}$'
+        example: '20261029-0001'
+
+  responses:
+    BadRequest:
+      description: Parâmetro inválido
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Sessão ausente ou expirada
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Perfil sem permissão para o recurso
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Recurso inexistente ou não pertencente ao titular
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Validação de negócio falhou
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: Limite de requisições excedido
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      type: object
+      description: Formato de erro RFC 7807
+      required: [type, title, status, detail, instance, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://sosp.gov.br/errors/validation
+        title:
+          type: string
+          example: Requisição inválida
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: O campo pageSize deve estar entre 1 e 50.
+        instance:
+          type: string
+          example: /api/v1/services
+        traceId:
+          type: string
+          example: 4bf92f3577b34da6a3ce929d0e0e4736
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+                example: pageSize
+              message:
+                type: string
+                example: deve estar entre 1 e 50
+
+    Pagination:
+      type: object
+      required: [page, pageSize, total, totalPages]
+      properties:
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 148
+        totalPages:
+          type: integer
+          example: 15
+
+    Category:
+      type: string
+      enum: [health, education, documents, transport, socialAssistance, taxes, work]
+
+    CategoryOption:
+      type: object
+      required: [value, label]
+      properties:
+        value:
+          $ref: '#/components/schemas/Category'
+        label:
+          type: string
+          example: Documentos
+
+    Channel:
+      type: string
+      enum: [online, inPerson, hybrid]
+
+    ServiceSummary:
+      type: object
+      required: [id, name, agency, category, channel, isFree, averageDeadlineDays, summary, href]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Emitir Carteira de Identidade
+        agency:
+          $ref: '#/components/schemas/Agency'
+        category:
+          $ref: '#/components/schemas/Category'
+        channel:
+          $ref: '#/components/schemas/Channel'
+        isFree:
+          type: boolean
+          example: true
+        costAmount:
+          type: number
+          nullable: true
+          multipleOf: 0.01
+          example: null
+        averageDeadlineDays:
+          type: integer
+          example: 10
+        unitCount:
+          type: integer
+          example: 3
+        summary:
+          type: string
+          example: Emissão da carteira de identidade para residentes no estado.
+        href:
+          type: string
+          example: /servicos/7f3c2a10-0f6e-4a7b-9c1d-2e3f4a5b6c7d
+
+    ServiceList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceSummary'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ServiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/ServiceSummary'
+        - type: object
+          required: [description, eligibility, documents, steps, units, faq, updatedAt]
+          properties:
+            description:
+              type: string
+            eligibility:
+              type: string
+            prerequisites:
+              type: string
+              nullable: true
+            documents:
+              type: array
+              items:
+                $ref: '#/components/schemas/ServiceDocument'
+            steps:
+              type: array
+              items:
+                $ref: '#/components/schemas/ServiceStep'
+            units:
+              type: array
+              items:
+                $ref: '#/components/schemas/Unit'
+            faq:
+              type: array
+              items:
+                $ref: '#/components/schemas/FaqItem'
+            externalUrl:
+              type: string
+              nullable: true
+              format: uri
+            updatedAt:
+              type: string
+              format: date-time
+
+    ServiceStep:
+      type: object
+      required: [id, order, title, description]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: Separe os documentos
+        description:
+          type: string
+        estimatedTime:
+          type: string
+          nullable: true
+          example: 10 minutos
+
+    ServiceDocument:
+      type: object
+      required: [id, name, isMandatory]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Comprovante de residência
+        isMandatory:
+          type: boolean
+        templateUrl:
+          type: string
+          nullable: true
+          format: uri
+
+    FaqItem:
+      type: object
+      required: [id, question, answer]
+      properties:
+        id:
+          type: string
+          format: uuid
+        question:
+          type: string
+        answer:
+          type: string
+        serviceId:
+          type: string
+          nullable: true
+          format: uuid
+        category:
+          allOf:
+            - $ref: '#/components/schemas/Category'
+          nullable: true
+
+    Agency:
+      type: object
+      required: [id, name, acronym, sphere]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Departamento Estadual de Trânsito
+        acronym:
+          type: string
+          example: DETRAN
+        sphere:
+          type: string
+          enum: [municipal, state, federal]
+
+    Unit:
+      type: object
+      required: [id, name, agencyId, address, isAccessible, hasPriorityService]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: DETRAN Maceió
+        agencyId:
+          type: string
+          format: uuid
+        address:
+          type: object
+          required: [street, number, neighborhood, city, state, zipCode]
+          properties:
+            street:
+              type: string
+            number:
+              type: string
+            neighborhood:
+              type: string
+            city:
+              type: string
+            state:
+              type: string
+            zipCode:
+              type: string
+        latitude:
+          type: number
+          nullable: true
+          example: -9.665987
+        longitude:
+          type: number
+          nullable: true
+          example: -35.735
+        openingHours:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 0
+                maximum: 6
+              opensAt:
+                type: string
+                pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+              closesAt:
+                type: string
+                pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        isAccessible:
+          type: boolean
+        hasPriorityService:
+          type: boolean
+
+    Slot:
+      type: object
+      required: [startsAt, endsAt, available]
+      properties:
+        startsAt:
+          type: string
+          example: '09:00'
+        endsAt:
+          type: string
+          example: '09:30'
+        available:
+          type: boolean
+          example: true
+
+    AppointmentCreate:
+      type: object
+      required: [serviceId, unitId, scheduledDate, scheduledTime]
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+        unitId:
+          type: string
+          format: uuid
+        scheduledDate:
+          type: string
+          format: date
+          example: '2026-11-12'
+        scheduledTime:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):(00|30)$'
+          example: '09:00'
+
+    Appointment:
+      type: object
+      required: [id, protocolNumber, serviceId, unitId, scheduledDate, scheduledTime, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        protocolNumber:
+          type: string
+          example: '20261112-0001'
+        serviceId:
+          type: string
+          format: uuid
+        unitId:
+          type: string
+          format: uuid
+        scheduledDate:
+          type: string
+          format: date
+        scheduledTime:
+          type: string
+          example: '09:00'
+        status:
+          type: string
+          enum: [scheduled, confirmed, completed, cancelled, noShow]
+        cancellationReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ProtocolStatus:
+      type: string
+      enum: [received, inReview, waitingDocument, scheduled, completed, cancelled]
+
+    ProtocolTransition:
+      type: object
+      required: [fromStatus, toStatus, actorType, createdAt]
+      properties:
+        fromStatus:
+          allOf:
+            - $ref: '#/components/schemas/ProtocolStatus'
+          nullable: true
+        toStatus:
+          $ref: '#/components/schemas/ProtocolStatus'
+        actorType:
+          type: string
+          enum: [citizen, servant, system]
+        note:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Protocol:
+      type: object
+      required: [protocolNumber, type, status, openedAt, transitions]
+      properties:
+        protocolNumber:
+          type: string
+          example: '20261112-0001'
+        type:
+          type: string
+          enum: [appointment, question]
+        status:
+          $ref: '#/components/schemas/ProtocolStatus'
+        appointmentId:
+          type: string
+          nullable: true
+          format: uuid
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          nullable: true
+          format: date-time
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProtocolTransition'
+
+    ProtocolList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Protocol'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    Guidance:
+      type: object
+      required: [serviceId, steps, documents, checkedDocumentIds, progress]
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceStep'
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceDocument'
+        checkedDocumentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 60
+        priorityAlert:
+          type: boolean
+          example: false
+
+    PdfJob:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, done, failed]
+        fileUrl:
+          type: string
+          nullable: true
+          format: uri
+        expiresAt:
+          type: string
+          nullable: true
+          format: date-time
+
+    ReviewCreate:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        comment:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    Review:
+      type: object
+      required: [id, protocolNumber, rating, moderationStatus, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        protocolNumber:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          nullable: true
+        moderationStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        createdAt:
+          type: string
+          format: date-time
+
+    QuestionCreate:
+      type: object
+      required: [serviceId, subject, message]
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+        subject:
+          type: string
+          maxLength: 200
+        message:
+          type: string
+          maxLength: 2000
+        attachmentUrl:
+          type: string
+          nullable: true
+          format: uri
+
+    NotificationPreference:
+      type: object
+      required: [notificationType, channel, isOptIn]
+      properties:
+        notificationType:
+          type: string
+          enum: [accountCreated, appointmentCreated, appointmentReminder, protocolStatusChanged, questionAnswered]
+        channel:
+          type: string
+          description: "Canal de notificação. `push` depende de `FEATURE_PUSH_ENABLED`, `sms` de `FEATURE_SMS_ENABLED` e `whatsapp` de `FEATURE_WHATSAPP_ENABLED` (v2.0/Fase 3)."
+          enum: [email, push, sms, whatsapp]
+        isOptIn:
+          type: boolean
+
+    Session:
+      type: object
+      required: [authenticated, subjectType, roles]
+      properties:
+        authenticated:
+          type: boolean
+        subjectType:
+          type: string
+          enum: [citizen, internal]
+        subjectId:
+          type: string
+          nullable: true
+          format: uuid
+        displayName:
+          type: string
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [citizen, servant, authorizedServant, administrator]
+        expiresAt:
+          type: string
+          nullable: true
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [cpf, password]
+      properties:
+        cpf:
+          type: string
+          pattern: '^[0-9]{11}$'
+          example: '12345678901'
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 32
+
+    ZipcodeAddress:
+      type: object
+      required: [zipCode, street, neighborhood, city, state]
+      properties:
+        zipCode:
+          type: string
+          example: '57020000'
+        street:
+          type: string
+          example: Avenida Fernandes Lima
+        neighborhood:
+          type: string
+          example: Farol
+        city:
+          type: string
+          example: Maceió
+        state:
+          type: string
+          example: AL
+
+    CityOption:
+      type: object
+      required: [id, name, state]
+      properties:
+        id:
+          type: integer
+          example: 2704302
+        name:
+          type: string
+          example: Maceió
+        state:
+          type: string
+          example: AL
+
+    ReportAppointmentRow:
+      type: object
+      required: [status, count]
+      properties:
+        status:
+          type: string
+          enum: [scheduled, confirmed, completed, cancelled, noShow]
+        count:
+          type: integer
+          example: 128
+
+    ExportJob:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, done, failed]
+        fileUrl:
+          type: string
+          nullable: true
+          format: uri
+
+    Address:
+      type: object
+      required: [zipCode, street, neighborhood, city, state, number]
+      properties:
+        zipCode:
+          type: string
+          pattern: '^[0-9]{8}$'
+          example: '57020000'
+        street:
+          type: string
+          example: Rua das Flores
+        neighborhood:
+          type: string
+          example: Centro
+        city:
+          type: string
+          example: Maceió
+        state:
+          type: string
+          pattern: '^[A-Z]{2}$'
+          example: AL
+        number:
+          type: string
+          example: '100'
+        complement:
+          type: string
+          nullable: true
+          example: Apto 302
+
+    CitizenProfile:
+      type: object
+      required: [id, cpf, fullName, birthDate, email, phone, genderId, isPcd, address, isActive, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        cpf:
+          type: string
+          pattern: '^[0-9]{11}$'
+          example: '12345678901'
+        fullName:
+          type: string
+          example: Maria da Silva
+        birthDate:
+          type: string
+          format: date
+          example: '1988-04-12'
+        email:
+          type: string
+          format: email
+          example: maria@example.com
+        phone:
+          type: string
+          pattern: '^[0-9]{10,11}$'
+          example: '82999999999'
+        genderId:
+          type: string
+          format: uuid
+        isPcd:
+          type: boolean
+          example: false
+        disabilityDescription:
+          type: string
+          nullable: true
+        motherName:
+          type: string
+          example: Ana da Silva
+        fatherName:
+          type: string
+          nullable: true
+        address:
+          $ref: '#/components/schemas/Address'
+        avatarUrl:
+          type: string
+          nullable: true
+          format: uri
+        emailVerifiedAt:
+          type: string
+          nullable: true
+          format: date-time
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CitizenProfileUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          pattern: '^[0-9]{10,11}$'
+        genderId:
+          type: string
+          format: uuid
+        isPcd:
+          type: boolean
+        disabilityDescription:
+          type: string
+          maxLength: 120
+          nullable: true
+        motherName:
+          type: string
+          maxLength: 120
+        fatherName:
+          type: string
+          maxLength: 120
+          nullable: true
+        zipCode:
+          type: string
+          pattern: '^[0-9]{8}$'
+        street:
+          type: string
+          maxLength: 120
+        neighborhood:
+          type: string
+          maxLength: 80
+        city:
+          type: string
+          maxLength: 80
+        state:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        addressNumber:
+          type: string
+          maxLength: 10
+        addressComplement:
+          type: string
+          maxLength: 60
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+          format: uri
+
+    CitizenRegistration:
+      type: object
+      required: [cpf, fullName, birthDate, email, phone, gender, isPcd, motherName, password, confirmPassword, zipCode, street, neighborhood, city, state, number]
+      properties:
+        cpf:
+          type: string
+          description: CPF com máscara XXX.XXX.XXX-XX
+        fullName:
+          type: string
+          maxLength: 120
+        birthDate:
+          type: string
+          format: date
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        gender:
+          type: string
+        isPcd:
+          type: boolean
+        pcdDescription:
+          type: string
+          nullable: true
+        motherName:
+          type: string
+          maxLength: 120
+        fatherName:
+          type: string
+          maxLength: 120
+          nullable: true
+        password:
+          type: string
+          format: password
+          description: Mínimo 8 caracteres, 1 maiúscula, 1 número, 1 especial
+        confirmPassword:
+          type: string
+          format: password
+        zipCode:
+          type: string
+        street:
+          type: string
+        neighborhood:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        number:
+          type: string
+        complement:
+          type: string
+          nullable: true
+
+    CitizenRegistrationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          example: Cadastro realizado com sucesso
+
+    EmailEvent:
+      type: object
+      required: [eventId, type, occurredAt, recipient, deliveryId]
+      properties:
+        eventId:
+          type: string
+          example: evt_01J9Z8K3M4
+        type:
+          type: string
+          enum: [delivered, bounced, complained, opened]
+        occurredAt:
+          type: string
+          format: date-time
+        recipient:
+          type: string
+          format: email
+        deliveryId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          nullable: true
+          example: mailbox_full
