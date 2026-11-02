@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 30/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 1](01-product-specs.md) · [Pilar 2](02-design-ux.md) · [Pilar 3](03-architecture.md) · [Pilar 4](04-data-api.md) · [Pilar 5](05-engineering-devops.md)
 
 ---
@@ -37,7 +37,7 @@ O **SOSP — Sistema de Orientação para Serviços Públicos** é um ponto de e
 | [Pilar 5 — Engenharia, DevOps e operação](05-engineering-devops.md) | Onboarding, segredos, Git, testes, CI/CD, observabilidade, runbook, backup, postmortem e flags | No dia a dia de desenvolvimento e operação |
 | [Pilar 6 — Gestão do projeto](06-project-management.md) | Stakeholders, cronograma, riscos, metodologia, cerimônias e Definition of Ready | Ao planejar sprint, release ou apresentação |
 | [Casos de uso detalhados](use-cases/README.md) | UC-01 a UC-17 com atores, fluxos, exceções, pós-condições e RN relacionadas | Ao implementar ou testar um fluxo completo |
-| [Índice de telas](design/README.md) | 45 telas do Figma (30 mobile + 15 web), RF relacionado, âncoras e links por frame | Ao localizar ou revisar uma tela |
+| [Índice de telas](design/README.md) | 30 telas no total (15 do cidadão web com suporte mobile, 5 do servidor, 6 administrativas e 4 transversais — 45 frames no Figma), RF relacionado e `node-id` | Ao localizar ou revisar uma tela |
 | [Exportações do design](design/exports/README.md) | Instruções e registro das exportações PNG/PDF do protótipo | Quando o Figma estiver indisponível |
 | [Roteiro da demonstração](demo-7-minutos.md) | Roteiro ensaiado de 7 minutos para a apresentação | Antes de demonstrar o sistema |
 | [Glossário](glossario.md) | Definição dos termos e siglas usados na documentação | Quando um termo não estiver claro |
@@ -84,11 +84,11 @@ Quando dois artefatos divergirem, a precedência é a abaixo. A ordem vale para 
 | Artefato | Link | Observação |
 |---|---|---|
 | Protótipo oficial no Figma | <https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1> | **Acesso somente visualização**; não requer conta paga |
-| Índice das 45 telas | [docs/design/README.md](design/README.md) | 30 telas mobile + 15 versões web do cidadão |
+| Índice das 30 telas | [docs/design/README.md](design/README.md) | 30 telas (15 cidadão web+mobile, 5 servidor, 6 admin, 4 transversais — 45 frames no Figma) |
 | Protótipo HTML do RF-06 | [`Prototipo/`](../Prototipo/) | Artefato técnico derivado; abrir `rf006_busca.html` e `rf006_ficha.html` |
 | Design System | [`DesignSystem/index.html`](../DesignSystem/index.html) | Catálogo vivo de tokens e componentes |
 | Exportações do protótipo | [`docs/design/exports/`](design/exports/) | PNG/PDF com data de exportação |
-| Repositório | `https://github.com/<org>/sosp` | `<preencher>` com a URL definitiva |
+| Repositório | `https://github.com/euoluizg/SOSP` | Repositório oficial do monorepo (main + develop) |
 
 **Por que exportar:** o arquivo do Figma pode mudar de permissão, de owner ou de conteúdo. As exportações em [`docs/design/exports/`](design/exports/) garantem que a documentação continue legível na apresentação e na avaliação. O link do Figma continua sendo a fonte oficial de aparência; a exportação é uma cópia datada.
 
@@ -98,13 +98,13 @@ Quando dois artefatos divergirem, a precedência é a abaixo. A ordem vale para 
 
 | Nome | Papel | Responsabilidades principais |
 |---|---|---|
-| `<preencher>` | Product Owner (PO) | Prioriza o backlog, valida requisitos, decide escopo do MVP e aprova divergências |
-| `<preencher>` | Tech Lead | Arquitetura, ADRs, revisão de contrato e de migração, mentoria e decisões técnicas |
-| `<preencher>` | Back-end | API Django, workers, schema, migrações, testes de integração e segurança |
-| `<preencher>` | Front-end | Portal Next.js, acessibilidade, design system, testes E2E e performance |
-| `<preencher>` | Design | Figma, fluxos, protótipos, tokens, microcopy e validação de usabilidade |
-| `<preencher>` | QA | Plano de testes, casos de uso, critérios de aceite, regressão e evidências |
-| `<preencher>` | DevOps / plantão | CI/CD, ambientes, observabilidade, backup, runbook e resposta a incidentes |
+| `Mozart Melo` | Product Owner (PO) | Prioriza o backlog, valida requisitos, decide escopo do MVP e aprova divergências |
+| `Arthur Franco` | Tech Lead | Arquitetura, ADRs, revisão de contrato e de migração, mentoria e decisões técnicas |
+| `Arthur Franco` | Back-end | API Django, workers, schema, migrações, testes de integração e segurança |
+| `Luiz Gustavo` | Front-end | Portal Next.js, acessibilidade, design system, testes E2E e performance |
+| `Luiz Gustavo` | Design | Figma, fluxos, protótipos, tokens, microcopy e validação de usabilidade |
+| `Luiz Gustavo` | QA | Plano de testes, casos de uso, critérios de aceite, regressão e evidências |
+| `Arthur Franco` | DevOps / plantão | CI/CD, ambientes, observabilidade, backup, runbook e resposta a incidentes |
 
 **Regra de decisão:** requisito e escopo são decididos pelo PO; arquitetura e tecnologia pelo Tech Lead com o time; contrato OpenAPI exige revisão de um dev de back-end e um de front-end; migração de banco exige revisão de back-end e Tech Lead.
 

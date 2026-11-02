@@ -15,7 +15,7 @@ info:
     - `Idempotency-Key` é obrigatório em criação de agendamento.
     - Datas em `YYYY-MM-DD`; horários em `HH:MM`; timestamps em ISO 8601 UTC.
   contact:
-    name: Equipe de Engenharia de Software — CESMAC
+    name: Arthur Franco e Luiz Gustavo — CESMAC
     email: equipe.sosp@cesmac.edu.br
   license:
     name: Uso interno

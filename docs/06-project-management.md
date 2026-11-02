@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 0](README.md) · [Pilar 1](01-product-specs.md) · [Pilar 2](02-design-ux.md) · [Pilar 3](03-architecture.md) · [Pilar 4](04-data-api.md) · [Pilar 5](05-engineering-devops.md)
 
 ---
@@ -108,15 +108,15 @@ A gestão é leve de propósito. O projeto tem um time pequeno, um semestre e um
 
 ## 4. Organização do time
 
-| Papel | Quantidade | Dedicação esperada | Responsabilidade de entrega |
-|---|---|---|---|
-| Product Owner | 1 | 20% | Backlog, escopo, aceite, divergências |
-| Tech Lead | 1 | 50% | Arquitetura, ADRs, revisão, desbloqueio técnico |
-| Back-end | 2 | 80% | API, workers, schema, migrações, testes de integração |
-| Front-end | 2 | 80% | Portal, acessibilidade, design system, E2E |
-| Design | 1 | 40% | Figma, fluxos, tokens, microcopy, usabilidade |
-| QA | 1 | 60% | Plano de testes, casos de uso, regressão, evidências |
-| DevOps / plantão | 1 (acumulado com Tech Lead) | 20% | CI/CD, ambientes, observabilidade, backup |
+| Papel | Responsável | Quantidade | Dedicação esperada | Responsabilidade de entrega |
+|---|---|---|---|---|
+| Product Owner | `Mozart Melo` | 1 | 20% | Backlog, escopo, aceite, divergências |
+| Tech Lead | `Arthur Franco` | 1 | 50% | Arquitetura, ADRs, revisão, desbloqueio técnico |
+| Back-end | `Arthur Franco` | 1 (acumulado) | 80% | API, workers, schema, migrações, testes de integração |
+| Front-end | `Luiz Gustavo` | 1 | 80% | Portal, acessibilidade, design system, E2E |
+| Design | `Luiz Gustavo` | 1 (acumulado com Front-end) | 40% | Figma, fluxos, tokens, microcopy, usabilidade |
+| QA | `Luiz Gustavo` | 1 (acumulado com Front-end) | 60% | Plano de testes, casos de uso, regressão, evidências |
+| DevOps / plantão | `Arthur Franco` | 1 (acumulado com Tech Lead) | 20% | CI/CD, ambientes, observabilidade, backup |
 
 **Regras de decisão**
 
@@ -187,7 +187,7 @@ flowchart LR
 
 ## 6. Cronograma e marcos
 
-O cronograma é **relativo ao calendário acadêmico**. A data oficial da apresentação está pendente de confirmação (`<preencher>`); os marcos abaixo usam semanas, não datas, para não criar compromisso falso.
+O cronograma é **relativo ao calendário acadêmico**. A data oficial da apresentação é definida conforme o calendário da disciplina; os marcos abaixo usam semanas, não datas fixas, para não criar compromisso falso.
 
 | Marco | Semana | Entrega | Gate de saída |
 |---|---|---|---|

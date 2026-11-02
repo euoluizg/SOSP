@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 2](02-design-ux.md) · [Pilar 3](03-architecture.md) · [Pilar 4](04-data-api.md) · [Pilar 5](05-engineering-devops.md)
 > **Documentos complementares:** [Casos de uso](use-cases/README.md) · [Índice de telas](design/README.md) · [Gestão do projeto](06-project-management.md) · [Roteiro da demo](demo-7-minutos.md) · [Glossário](glossario.md)
 > **Protótipo oficial:** [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) · **Acesso somente visualização**
@@ -1167,11 +1167,11 @@ O protótipo no Figma foi construído antes do fechamento do texto dos requisito
 
 | Artefato | Caminho ou referência | O que é | É o protótipo oficial? |
 |---|---|---|---|
-| Figma `SOSP` | 45 telas (30 mobile + 15 web) | Protótipo visual de referência | **Sim** |
+| Figma `SOSP` | 30 telas (15 cidadão web+mobile, 5 servidor, 6 admin, 4 transversais — 45 frames no Figma) | Protótipo visual de referência | **Sim** |
 | HTML `rf006_busca.html` e `rf006_ficha.html` | `Prototipo/` | Implementação navegável do recorte RF-06, usada para teste | Não — artefato técnico derivado |
 | `DesignSystem/index.html` | `DesignSystem/` | Documentação viva de tokens e componentes | Não — catálogo do Design System |
 
-O HTML do RF-06 e o Figma **não são o mesmo protótipo**. O primeiro é uma prova de implementação do recorte de busca e ficha; o segundo é a referência visual de todas as 45 telas. Quando os dois divergirem entre si, vale o Figma para aparência e o requisito para comportamento.
+O HTML do RF-06 e o Figma **não são o mesmo protótipo**. O primeiro é uma prova de implementação do recorte de busca e ficha; o segundo é a referência visual das 30 telas (45 frames) do sistema. Quando os dois divergirem entre si, vale o Figma para aparência e o requisito para comportamento.
 
 As nove primeiras divergências foram mapeadas na entrega do RF-06. As divergências D10 a D13 são sistêmicas: atravessam requisito, arquitetura e contrato técnico, e por isso não poderiam ficar restritas ao recorte de busca.
 
@@ -1223,7 +1223,7 @@ As nove primeiras divergências foram mapeadas na entrega do RF-06. As divergên
 | RF-13 | — | UC-16 | — | `GET /notifications/preferences`, `PUT /notifications/preferences` | CA-21 |
 | RF-14 | US-19 | UC-17 | W11, W15 | `GET /reports/appointments`, `POST /reports/exports` | CA-18 |
 
-A numeração de tela segue o [índice de telas](design/README.md): `01`–`30` são mobile e `W01`–`W15` são web. O índice liga cada tela ao RF, ao UC, ao status e ao `node-id` do Figma; o `node-id` permanece `<preencher>` até a exportação oficial.
+A numeração de tela segue o [índice de telas](design/README.md): são **30 telas no total** (`01`–`30`), sendo 15 do cidadão (`01`–`15`, web com suporte responsivo para celulares, representadas em frames mobile e web `W01`–`W15`), 5 do servidor (`16`–`20`), 6 administrativas (`21`–`26`) e 4 transversais (`27`–`30`). O índice liga cada tela ao RF, ao UC, ao status e ao `node-id` oficial do Figma.
 
 ### 8.2 Requisito → RNF → RS
 
@@ -1268,13 +1268,13 @@ Este pilar define **o que** o sistema deve fazer. Os documentos abaixo aprofunda
 | Artefato | O que contém | Quando consultar |
 |---|---|---|
 | [Casos de uso — UC-01 a UC-17](use-cases/README.md) | Ator, pré-condições, gatilho, fluxo principal, alternativos, exceções, pós-condições, RN/CA e contrato de cada UC; diagrama e matriz de rastreabilidade | Ao implementar ou testar um fluxo completo |
-| [Índice de telas — 45 telas](design/README.md) | 30 telas mobile e 15 web, com RF, UC, status e `node-id`; regras de nomenclatura e governança | Ao implementar, revisar ou exportar uma tela |
+| [Índice de telas — 30 telas](design/README.md) | 30 telas no total (15 cidadão web com suporte mobile, 5 servidor, 6 administrativas e 4 transversais — 45 frames no Figma), com RF, UC, status e `node-id` | Ao implementar, revisar ou exportar uma tela |
 | [Exportações de design](design/exports/README.md) | Padrão de nome, pasta, checklist e registro das exportações oficiais | Antes de anexar imagens ao relatório ou à apresentação |
 | [Gestão do projeto](06-project-management.md) | Stakeholders, escopo, cronograma, cerimônias, riscos, métricas e Definition of Ready | Ao planejar a sprint ou comunicar status |
 | [Roteiro da demo de 7 minutos](demo-7-minutos.md) | Blocos cronometrados, checklist pré-demo, plano B e perguntas prováveis | Na véspera e no dia da apresentação |
 | [Glossário](glossario.md) | Vocabulário de produto, requisitos, arquitetura, segurança, processo e banco | Quando um termo aparecer sem definição no texto |
 | [ADRs](adr/) | Decisões arquiteturais com contexto, alternativas e consequências | Antes de propor mudança que contrarie uma decisão aceita |
-| [Protótipo oficial — Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | Aparência, hierarquia e conteúdo das 45 telas | Ao implementar a interface; acesso somente visualização |
+| [Protótipo oficial — Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | Aparência, hierarquia e conteúdo das 30 telas (45 frames) | Ao implementar a interface; acesso somente visualização |
 
 **Relação com o protótipo HTML.** O arquivo `Prototipo/rf006_*.html` é uma prova de implementação do recorte de busca e ficha (RF-06), não o protótipo oficial. Quando ele divergir do Figma, vale o Figma para aparência e este pilar para comportamento. O `DesignSystem/index.html` é o catálogo vivo de tokens e componentes, não uma tela do produto.
 

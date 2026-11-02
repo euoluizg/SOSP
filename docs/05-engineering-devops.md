@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 1](01-product-specs.md) · [Pilar 2](02-design-ux.md) · [Pilar 3](03-architecture.md) · [Pilar 4](04-data-api.md)
 > **Documentos complementares:** [CONTRIBUTING](../CONTRIBUTING.md) · [CHANGELOG](../CHANGELOG.md) · [ADR-004 — Git Flow](adr/ADR-004-git-flow-simplificado.md) · [ADR-007 — Feature flags](adr/ADR-007-feature-flags.md) · [ADR-008 — Supabase](adr/ADR-008-supabase-postgresql-gerenciado.md) · [Glossário](glossario.md)
 > **Artefatos operacionais:** [`schema.sql`](database/schema.sql) · [`openapi.yaml`](api/openapi.yaml) · [`.env.example`](../.env.example)
@@ -436,15 +436,22 @@ O repositório adota **Git Flow simplificado**: `main` (produção) + `develop` 
 
 **Proibido:** commit direto e force push em `main` e `develop`; merge sem revisão e sem CI verde.
 
-**Separação por área**
+**Separação por área (`FE` / `BE` / `FULL`) e Nomenclatura de Tasks**
 
-| Área | Caminho | Exemplo de branch | Exemplo de commit |
-|---|---|---|---|
-| `back` | `backend/` | `feat/back/rf06-endpoint-busca` | `feat(back/search): adiciona filtro por município` |
-| `front` | `portal/` | `feat/front/rf06-tela-busca` | `feat(front/search): implementa filtro por município` |
-| `full` | ambos | `feat/full/rf08-campo-observacao` | `feat(full/scheduling): adiciona observação` |
+Para manter rastreabilidade direta com o [Documento de Requisitos](Documento_de_Requisitos_Modelo_RF_v10.pdf) e evitar conflitos no Git, cada Requisito Funcional é dividido em duas tasks independentes (`[FE]` para Front-end e `[BE]` para Back-end):
 
-Etiquetas no GitHub: `area:backend`, `area:frontend`, `area:fullstack`, além de etiquetas por requisito (`RF-06`, `RF-08`…). O campo **Área** do GitHub Projects permite filtrar o quadro por time.
+- **Título do Card / Issue / Pull Request:**
+  `[<FE|BE>] [<RFXXX>] <Descrição da entrega na camada> (<Prioridade>)`
+- **Nome da Branch no Git (sem espaços, colchetes ou acentos):**
+  `feat/<fe|be>/rfxxx-<slug-curto>`
+
+| Área | Sigla (Card/PR) | Caminho | Exemplo de título de Card / Issue / PR | Exemplo de branch no Git | Exemplo de commit |
+|---|---|---|---|---|---|
+| Back-end | `[BE]` | `backend/` | `[BE] [RF001] Cadastro Cidadão Manual, Hash Argon2id e CEP/IBGE (Essencial)` | `feat/be/rf001-cadastro-cidadao` | `feat(be/rf001): implementa cadastro manual e hash argon2id` |
+| Front-end | `[FE]` | `portal/` | `[FE] [RF001] Cadastro Cidadão Manual (Essencial)` | `feat/fe/rf001-cadastro-cidadao` | `feat(fe/rf001): implementa tela de cadastro manual` |
+| Fullstack | `[FULL]` | ambos | `[FULL] [RF008] Ajuste no Comprovante de Agendamento (Essencial)` | `feat/full/rf008-comprovante` | `feat(full/rf008): ajusta campo no comprovante` |
+
+Etiquetas no GitHub: `area:backend` (`[BE]`), `area:frontend` (`[FE]`), `area:fullstack` (`[FULL]`), além de etiquetas por requisito (`RF001` a `RF014`) e prioridade (`Essencial`, `Importante`, `Desejável`). A tabela completa de todas as 28 tasks pareadas (`[FE]` e `[BE]` de `RF001` a `RF014`) está no [ADR-004](adr/ADR-004-git-flow-simplificado.md).
 
 **Tarefas que envolvem front e back (contract-first)**
 

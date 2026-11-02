@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 1](01-product-specs.md) · [Pilar 3](03-architecture.md) · [Pilar 4](04-data-api.md) · [Pilar 5](05-engineering-devops.md)
 > **Documentos complementares:** [Índice de telas](design/README.md) · [Casos de uso](use-cases/README.md) · [Exportações](design/exports/README.md) · [Glossário](glossario.md)
 > **Protótipo oficial:** [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) · **Acesso somente visualização**
@@ -686,9 +686,9 @@ Meta: **WCAG 2.1 nível AA** e **eMAG**. Acessibilidade é critério de aceite, 
 
 | Regra | Aplicação |
 |---|---|
-| **Fonte visual** | O protótipo oficial é o [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1), com 45 telas; o índice está em [design/README.md](design/README.md) |
+| **Fonte visual** | O protótipo oficial é o [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1), com 30 telas (15 cidadão web com suporte mobile, 5 servidor, 6 administrativas e 4 transversais — 45 frames); o índice está em [design/README.md](design/README.md) |
 | **Fonte única de token** | Tokens em `DesignSystem/css/tokens.css`; componentes em `components.css`; nenhum valor hex solto em página |
-| **Antes de criar, procurar** | Verificar os 40 componentes e as 45 telas antes de propor um novo |
+| **Antes de criar, procurar** | Verificar os 40 componentes e as 30 telas antes de propor um novo |
 | **Versionamento** | Mudança de token é minor; remoção ou renome é major |
 | **Revisão obrigatória** | Todo componente novo passa por design + acessibilidade + front-end |
 | **Documentação viva** | Storybook é o catálogo; a documentação em Markdown aponta para ele |
@@ -725,7 +725,7 @@ flowchart LR
 
 ### 10.3 Protótipo oficial e índice de telas
 
-O Figma `SOSP` é a **fonte oficial de aparência**. Ele contém 45 telas — 30 mobile e 15 web — e é a referência para hierarquia, espaçamento, conteúdo e estados visuais. O acesso é somente visualização.
+O Figma `SOSP` é a **fonte oficial de aparência**. Ele contém **30 telas no total** (representadas em 45 frames: 15 do cidadão em versão web e mobile, 5 do servidor, 6 administrativas e 4 transversais) — e é a referência para hierarquia, espaçamento, conteúdo e estados visuais. O acesso é somente visualização.
 
 | Artefato | Papel | Em caso de conflito |
 |---|---|---|
@@ -738,7 +738,7 @@ O Figma `SOSP` é a **fonte oficial de aparência**. Ele contém 45 telas — 30
 **Regras de uso:**
 
 1. Nenhuma tela é implementada sem estar no [índice](design/README.md) e ligada a um RF ou a uma decisão explícita de tela de apoio.
-2. O `node-id` de cada frame é copiado do Figma para o índice; até lá, a coluna permanece `<preencher>`.
+2. O `node-id` de cada frame no Figma está mapeado na tabela do [índice](design/README.md).
 3. As telas marcadas `v2.0` (avaliação) só existem com a flag correspondente ligada.
 4. As telas com divergência aberta (D1–D13) são implementadas conforme o requisito, não conforme o frame, até a divergência ser encerrada.
 5. A exportação oficial segue o [padrão de exportações](design/exports/README.md); o índice registra o que já foi exportado.
