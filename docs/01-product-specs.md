@@ -917,7 +917,7 @@ O modal contém um botão "Entendi, quero usar CPF e senha" que o fecha e manté
 | A1 | Nenhum resultado | Mensagem literal "Nenhum serviço encontrado. Tente outro termo ou categoria." + sugestões + Ouvidoria |
 | A2 | Serviço inativo | Não aparece na busca; acesso direto retorna 404 |
 | A3 | Filtro inválido | Retorna 400 com o campo e o valor recusado |
-| A4 | Ação que exige login | Redireciona ao Gov.br preservando a ação de origem |
+| A4 | Ação que exige login | Redireciona à tela de login local (CPF + senha) preservando a ação de origem |
 
 **Blocos da ficha**
 
@@ -1179,19 +1179,19 @@ As nove primeiras divergências foram mapeadas na entrega do RF-06. As divergên
 
 | ID | Ponto | O que diz o requisito | O que mostra o protótipo | Tela no Figma | Impacto | Decisão | Responsável | Encerrado quando |
 |---|---|---|---|---|---|---|---|---|
-| **D1** | Ações da ficha | Três botões: Ver Passo-a-Passo, Agendar e Avaliar | Web e mobile exibem "Iniciar solicitação" e um link secundário | 05, W03 | Alto — o cidadão não encontra o guia nem o agendamento a partir da ficha | 🎨 Ajustar o Figma | Design | Tela 05 com as três ações, sendo Avaliar condicionado ao RF-10 |
-| **D2** | Paginação | 10 resultados por página | Web mostra "1–4 de 148"; mobile usa rolagem contínua | 04, W02 | Médio — o requisito é verificável e o protótipo não o demonstra | 🎨 Ajustar o Figma | Design + Front-end | Lista web com 10 cards e contador; mobile com "Carregar mais" em blocos de 10 |
-| **D3** | Filtros | Categoria, Órgão, Canal e Município | Web: Categoria, Órgão e "Modalidade"; mobile: chips Online, Presencial, Gratuito, Acessível, Perto de mim | 04, 27, W02 | Alto — falta um filtro oficial e o vocabulário diverge | 🎨 Ajustar o Figma | Design | Município presente nos dois layouts e "Canal" no lugar de "Modalidade" |
-| **D4** | Mapa na ficha | "Onde fazer (unidades e mapa)" | Endereço e "Ver outras unidades", sem mapa | 05, 22, W03 | Médio — perda de orientação geográfica | 🎨 Ajustar o Figma | Design + Front-end | Bloco de mapa renderiza quando há latitude/longitude (RN-10) |
-| **D5** | Média de avaliações | RF-10 exibe média na ficha | Nenhuma ficha mostra média ou contagem | 05, W03 | Baixo no MVP (RF-10 fora do escopo); médio na v2.0 | ✅ Aceitar no MVP | Produto | Bloco de reputação entra junto com o RF-10 |
-| **D6** | Gate de login | Agendar e avaliar exigem conta | O protótipo não sinaliza o login nem o retorno à ação; o modal do Gov.br (futuro) e o formulário de CPF + senha não estão representados | 01, 08, W05, W08 | Alto — o cidadão é surpreendido no meio do fluxo | 🎨 Ajustar o Figma | Design + Requisitos | Estado "entre para agendar" e retorno pós-login representados |
-| **D7** | Elegibilidade do Avaliar | RF-06 prevê o botão, sem definir elegibilidade | O botão não existe | 05, W03 | Alto — ambigüidade de escopo entre RF-06 e RF-10 | 📝 Ajustar o texto | Requisitos | Botão só existe com RF-10 habilitado; exige protocolo concluído; desabilitado com explicação |
-| **D8** | Canal do serviço | Canal é um valor único: online, presencial ou híbrido | Tag "Presencial" e metadado "Atendimento Presencial e online" na mesma tela | 05, W03 | Baixo — inconsistência de conteúdo | 🎨 Ajustar o Figma | Design | Tag e metadado derivados do mesmo campo |
-| **D9** | Estado vazio | Mensagem literal "Nenhum serviço encontrado. Tente outro termo ou categoria." | Mobile exibe "Não encontrou o que procura? Tente outra palavra…" | 19, W02 | Baixo — texto divergente, mas há saída | 🎨 Ajustar o Figma | Design | Mensagem literal como título e texto de apoio como complemento |
-| **D10** | Autenticação do cidadão | RF-01 e RF-02 descrevem cadastro com senha e login por CPF e senha | Arquitetura define Gov.br como provedor de identidade do cidadão | 01, 02, W08 | Alto — cadastro manual do cidadão substitui Gov.br como primário no MVP | 📝 Ajustar o texto | Requisitos + Arquitetura | RF-01 e RF-02 revisados: Gov.br para cidadão, CPF/senha para servidores |
-| **D11** | Canal de notificação | RF-08 e RF-13 citam SMS | Arquitetura define e-mail transacional no MVP; push, SMS e WhatsApp na v2.0/Fase 3 | — (sem tela no MVP) | Médio — promessa de canal não entregue | ✅ Aceitar com justificativa | Produto | Texto do RF-08 e RF-13 alinhado ao MVP; push, SMS e WhatsApp no roadmap |
+| **D1** | Ações da ficha | Três botões: Ver Passo-a-Passo, Agendar e Avaliar | Web e mobile exibem "Iniciar solicitação" e um link secundário | 05, W05 | Alto — o cidadão não encontra o guia nem o agendamento a partir da ficha | 🎨 Ajustar o Figma | Design | Tela 05/W05 com as três ações, sendo Avaliar condicionado ao RF-10 |
+| **D2** | Paginação | 10 resultados por página | Web mostra "1–4 de 148"; mobile usa rolagem contínua | 04, W04 | Médio — o requisito é verificável e o protótipo não o demonstra | 🎨 Ajustar o Figma | Design + Front-end | Lista web com 10 cards e contador; mobile com "Carregar mais" em blocos de 10 |
+| **D3** | Filtros | Categoria, Órgão, Canal e Município | Web: Categoria, Órgão e "Modalidade"; mobile: chips Online, Presencial, Gratuito, Acessível, Perto de mim | 04, W04 | Alto — falta um filtro oficial e o vocabulário diverge | 🎨 Ajustar o Figma | Design | Município presente nos dois layouts e "Canal" no lugar de "Modalidade" |
+| **D4** | Mapa na ficha | "Onde fazer (unidades e mapa)" | Endereço e "Ver outras unidades", sem mapa | 05, 22, W05 | Médio — perda de orientação geográfica | 🎨 Ajustar o Figma | Design + Front-end | Bloco de mapa renderiza quando há latitude/longitude (RN-10) |
+| **D5** | Média de avaliações | RF-10 exibe média na ficha | Nenhuma ficha mostra média ou contagem | 05, W05 | Baixo no MVP (RF-10 fora do escopo); médio na v2.0 | ✅ Aceitar no MVP | Produto | Bloco de reputação entra junto com o RF-10 |
+| **D6** | Gate de login | Agendar e avaliar exigem conta | O protótipo não sinaliza o login nem o retorno à ação; o modal do Gov.br (futuro) e o formulário de CPF + senha não estão representados | 01, 09, W01, W09 | Alto — o cidadão é surpreendido no meio do fluxo | 🎨 Ajustar o Figma | Design + Requisitos | Estado "entre para agendar" (CPF + senha) e retorno pós-login representados |
+| **D7** | Elegibilidade do Avaliar | RF-06 prevê o botão, sem definir elegibilidade | O botão não existe | 05, W05 | Alto — ambigüidade de escopo entre RF-06 e RF-10 | 📝 Ajustar o texto | Requisitos | Botão só existe com RF-10 habilitado; exige protocolo concluído; desabilitado com explicação |
+| **D8** | Canal do serviço | Canal é um valor único: online, presencial ou híbrido | Tag "Presencial" e metadado "Atendimento Presencial e online" na mesma tela | 05, W05 | Baixo — inconsistência de conteúdo | 🎨 Ajustar o Figma | Design | Tag e metadado derivados do mesmo campo |
+| **D9** | Estado vazio | Mensagem literal "Nenhum serviço encontrado. Tente outro termo ou categoria." | Mobile exibe "Não encontrou o que procura? Tente outra palavra…" | 04, W04 | Baixo — texto divergente, mas há saída | 🎨 Ajustar o Figma | Design | Mensagem literal como título e texto de apoio como complemento |
+| **D10** | Autenticação do cidadão | RF-01 e RF-02 exigem cadastro manual e login local por CPF + senha, com botão Gov.br exibindo modal de implementação futura | Frames 01, W01 e 27 no Figma foram desenhados como "Login Gov.br" e "Erro Gov.br" | 01, 02, 27, W01, W02 | Alto — protótipo visual mostra Gov.br direto em vez do formulário CPF + senha e modal informativo | 🎨 Ajustar o Figma / ✅ Vale o requisito ([ADR-003](adr/ADR-003-autenticacao-govbr-rbac.md)) | Requisitos + Arquitetura + Design | Implementação segue RF-01/RF-02 e ADR-003: login local CPF + senha para todos os perfis no MVP e modal informativo no botão Gov.br |
+| **D11** | Canal de notificação | RF-08 e RF-13 citam SMS | Arquitetura define e-mail transacional no MVP; push, SMS e WhatsApp na v2.0/Fase 3 | 14, W14 (v2.0) | Médio — promessa de canal não entregue | ✅ Aceitar com justificativa | Produto | Texto do RF-08 e RF-13 alinhado ao MVP; push, SMS e WhatsApp no roadmap |
 | **D12** | Requisito de hardware | RNF-03 fixa servidor 4 GHz/64 GB e cliente 2 GHz/4 GB | Arquitetura em contêineres elásticos, sem servidor dedicado | — (não é tela) | Baixo — requisito desatualizado tecnicamente | 📝 Ajustar o texto | Arquitetura | RNF-03 reescrito como capacidade de infraestrutura e requisito de cliente |
-| **D13** | Relatório de avaliações no MVP | RF-14 inclui a média das avaliações | RF-10 é Desejável/Could e está fora do MVP | W15 | Médio — relatório promete dado que o MVP não coleta | ✅ Aceitar com justificativa | Produto | Painel de avaliações oculto por feature flag até o RF-10; os demais relatórios entregues no MVP |
+| **D13** | Relatório de avaliações no MVP | RF-14 inclui a média das avaliações | RF-10 é Desejável/Could e está fora do MVP | 20, 26 | Médio — relatório promete dado que o MVP não coleta | ✅ Aceitar com justificativa | Produto | Painel de avaliações oculto por feature flag até o RF-10; os demais relatórios entregues no MVP |
 
 **Regras da matriz**
 
@@ -1208,20 +1208,20 @@ As nove primeiras divergências foram mapeadas na entrega do RF-06. As divergên
 
 | RF | User stories | UC | Telas | Endpoints principais | Critérios |
 |---|---|---|---|---|---|
-| RF-01 | US-13 | UC-01 | 01, 02, 14, 29, W08, W10 | `POST /citizens`, `PATCH /citizens/me`, `GET /cep/lookup` | CA-16 |
-| RF-02 | US-14, US-15 | UC-02 | 01, 17, W08 | `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-recovery`, `GET /auth/session` | CA-16 |
-| RF-03 | US-16 | UC-03 | 21, W13 | `GET /agencies` + Django Admin | CA-17 |
-| RF-04 | US-16 | UC-04 | 22, W13 | `GET /units` + Django Admin | CA-17 |
-| RF-05 | US-17 | UC-05 | 28, W12 | `GET /services/{serviceId}` + Django Admin | CA-17 |
-| RF-06 | US-01 a US-04 | UC-06, UC-07 | 03, 04, 05, 19, 22, 26, 27, W01, W02, W03 | `GET /services`, `GET /services/{serviceId}` | CA-01 a CA-10 |
-| RF-07 | US-05 a US-07 | UC-08 | 06, 07, W04 | `PUT /services/{serviceId}/guidance/checklist`, `POST /services/{serviceId}/guidance/pdf` | CA-11, CA-15 |
-| RF-08 | US-08 a US-10 | UC-09, UC-10 | 08, 09, 10, 24, 25, W05 | `GET /units/{unitId}/slots`, `POST /appointments` | CA-12, CA-13 |
-| RF-09 | US-11, US-12 | UC-11, UC-12 | 10, 11, 12, 15, W06, W07 | `GET /protocols`, `GET /protocols/{protocolNumber}` | CA-14 |
-| RF-10 | US-20 | UC-13 | 23 (v2.0) | `POST /protocols/{protocolNumber}/review` | CA-19 |
-| RF-11 | US-21 | UC-14 | 13, W09 | `GET /services/{serviceId}/faq`, `POST /questions` | CA-20 |
-| RF-12 | US-18 | UC-15 | W14 | Django Admin (sem rota pública) | CA-17 |
-| RF-13 | — | UC-16 | — | `GET /notifications/preferences`, `PUT /notifications/preferences` | CA-21 |
-| RF-14 | US-19 | UC-17 | W11, W15 | `GET /reports/appointments`, `POST /reports/exports` | CA-18 |
+| RF-01 | US-13 | UC-01 | 02, 15, 29, W02 | `POST /citizens`, `PATCH /citizens/me`, `GET /cep/lookup` | CA-16 |
+| RF-02 | US-14, US-15 | UC-02 | 01, 27, 28, W01 | `POST /auth/login`, `POST /auth/logout`, `POST /auth/password-recovery`, `GET /auth/session` | CA-16 |
+| RF-03 | US-16 | UC-03 | 21 | `GET /agencies` + Django Admin | CA-17 |
+| RF-04 | US-16 | UC-04 | 22 | `GET /units` + Django Admin | CA-17 |
+| RF-05 | US-17 | UC-05 | 19, 23 | `GET /services/{serviceId}` + Django Admin | CA-17 |
+| RF-06 | US-01 a US-04 | UC-06, UC-07 | 03, 04, 05, 06, W03, W04, W05, W06 | `GET /services`, `GET /services/{serviceId}` | CA-01 a CA-10 |
+| RF-07 | US-05 a US-07 | UC-08 | 07, 08, 30, W07, W08 | `PUT /services/{serviceId}/guidance/checklist`, `POST /services/{serviceId}/guidance/pdf` | CA-11, CA-15 |
+| RF-08 | US-08 a US-10 | UC-09, UC-10 | 09, 17, 29, 30, W09, W10 | `GET /units/{unitId}/slots`, `POST /appointments` | CA-12, CA-13 |
+| RF-09 | US-11, US-12 | UC-11, UC-12 | 10, 11, 18, W10, W11, W15 | `GET /protocols`, `GET /protocols/{protocolNumber}` | CA-14 |
+| RF-10 | US-20 | UC-13 | 12, W12 (v2.0) | `POST /protocols/{protocolNumber}/review` | CA-19 |
+| RF-11 | US-21 | UC-14 | 13, 25, W13 | `GET /services/{serviceId}/faq`, `POST /questions` | CA-20 |
+| RF-12 | US-18 | UC-15 | 24 | Django Admin (sem rota pública) | CA-17 |
+| RF-13 | — | UC-16 | 14, W14 (v2.0) | `GET /notifications/preferences`, `PUT /notifications/preferences` | CA-21 |
+| RF-14 | US-19 | UC-17 | 16, 20, 26, 30 | `GET /reports/appointments`, `POST /reports/exports` | CA-18 |
 
 A numeração de tela segue o [índice de telas](design/README.md): são **30 telas no total** (`01`–`30`), sendo 15 do cidadão (`01`–`15`, web com suporte responsivo para celulares, representadas em frames mobile e web `W01`–`W15`), 5 do servidor (`16`–`20`), 6 administrativas (`21`–`26`) e 4 transversais (`27`–`30`). O índice liga cada tela ao RF, ao UC, ao status e ao `node-id` oficial do Figma.
 

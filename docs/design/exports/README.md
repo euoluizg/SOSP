@@ -69,19 +69,19 @@ O Figma é a fonte oficial de aparência. Esta pasta guarda **cópias datadas** 
 
 1. No Figma, selecione o frame da tela.
 2. No painel direito, em **Export**, escolha **PNG** e escala **1×**.
-3. Clique em **Export <nome>** e salve em `docs/design/exports/mobile/` ou `docs/design/exports/web/`.
-4. Renomeie o arquivo conforme a [§4](#4-nomenclatura-dos-arquivos).
+3. Clique em **Export <nome>** e salve na respectiva pasta por perfil (`Cidadão/Mobile/`, `Cidadão/Web/`, `Servidor/`, `Administrador/` ou `Transversais/`).
+4. Mantenha o nome do frame conforme a [§4](#4-nomenclatura-dos-arquivos).
 5. Repita para as 30 telas (45 frames).
-6. Gere o PDF consolidado: selecione todos os frames de uma plataforma e exporte em **PDF**, ou una os PNGs em um PDF na ordem do índice.
+6. Gere o PDF consolidado: una os PNGs em um PDF na ordem do índice.
 7. Preencha a tabela da [§7](#7-como-atualizar) com data, responsável e versão.
 
 ### 3.3 Exportação por lote (quando os node-ids estiverem preenchidos)
 
 Com os IDs no índice, a exportação pode ser feita por script usando a API do Figma ou uma ferramenta de automação. O script deve:
 
-1. Ler a tabela do índice e extrair `#`, `Tela`, `Node ID` e plataforma.
+1. Ler a tabela do índice e extrair `#`, `Tela`, `Node ID` e plataforma/perfil.
 2. Exportar cada nó em PNG 1×.
-3. Nomear o arquivo com o padrão da [§4](#4-nomenclatura-dos-arquivos).
+3. Salvar o arquivo no padrão da [§4](#4-nomenclatura-dos-arquivos).
 4. Falhar se algum `node-id` estiver vazio ou inválido.
 5. Gerar um `manifest.json` com data, versão e hash de cada arquivo.
 
@@ -89,16 +89,16 @@ Com os IDs no índice, a exportação pode ser feita por script usando a API do 
 
 ```json
 {
-  "exportedAt": "2026-10-31T18:00:00-03:00",
+  "exportedAt": "2026-11-01T21:38:00-03:00",
   "figmaFile": "P8Pf9aZiagXQulJpP2guqz",
-  "figmaVersion": "v1.0",
+  "figmaVersion": "v1.0 (2416288953332883055)",
   "screens": [
     {
       "id": "04",
-      "name": "Busca e resultados",
-      "platform": "mobile",
-      "nodeId": "12:34",
-      "file": "mobile/04-busca-e-resultados.png",
+      "name": "04 · Busca",
+      "platform": "cidadão-mobile",
+      "nodeId": "8:459",
+      "file": "Cidadão/Mobile/04 · Busca.png",
       "sha256": "..."
     }
   ]
@@ -109,10 +109,10 @@ Com os IDs no índice, a exportação pode ser feita por script usando a API do 
 
 | Requisito | Regra |
 |---|---|
-| Ordem | A mesma do [índice](../README.md): mobile 01–30, depois web W01–W15 |
+| Ordem | A mesma do [índice](../README.md): Cidadão Mobile (`01`–`15`), Cidadão Web (`W01`–`W15`), Servidor (`16`–`20`), Administrador (`21`–`26`) e Transversais (`27`–`30`) |
 | Capa | Título, versão, data, link do Figma e aviso "acesso somente visualização" |
 | Rodapé | `SOSP · <tela> · <data>` em todas as páginas |
-| Formato | A4 paisagem para web, A4 retrato para mobile, ou página única por tela |
+| Formato | Página dimensionada para cada frame com rodapé informativo |
 | Tamanho | ≤ 25 MB; se passar, comprimir as imagens sem perder legibilidade |
 | Nome | `sosp-prototipo-<AAAA-MM-DD>.pdf` |
 
@@ -120,27 +120,30 @@ Com os IDs no índice, a exportação pode ser feita por script usando a API do 
 
 ## 4. Nomenclatura dos arquivos
 
-```text
-<numero>-<nome-em-kebab-case>.png
-```
+Os arquivos exportados preservam a organização por perfil e o título oficial do frame no Figma:
+
+- **Cidadão Mobile (`Cidadão/Mobile/`):** `<numero> · <Nome da Tela>.png` (ex.: `01 · Login Gov.br.png`)
+- **Cidadão Web (`Cidadão/Web/`):** `<numero> · <Nome da Tela> · Web.png` (ex.: `01 · Login Gov.br · Web.png`)
+- **Servidor (`Servidor/`) e Administrador (`Administrador/`):** `Tela · <Nome da Tela>.png` (ex.: `Tela · Dashboard do Servidor.png`, `Tela · Órgãos.png`)
+- **Transversais (`Transversais/`):** `<numero> · <Nome da Tela>.png` (ex.: `27 · Erro Gov.br.png`)
+- **Capa na raiz de `exports/`:** `capa-sosp.png`
 
 **Regras**
 
-1. O número é o do índice: `01`–`30` para mobile, `W01`–`W15` para web.
-2. O nome é em minúsculas, sem acentos, com hífens no lugar de espaços.
-3. Não inclua data no nome do arquivo; a data fica no manifesto e na tabela da [§7](#7-como-atualizar).
-4. Não use `final`, `v2`, `novo` ou `corrigido` no nome. Versão é histórico, não nome.
-5. Um arquivo por tela. Variantes de estado não são exportadas como tela separada, exceto a tela 19 (busca sem resultado).
+1. O número e o título seguem exatamente os frames do [índice](../README.md).
+2. Não inclua data no nome dos PNGs; a data fica no [`manifest.json`](manifest.json) e na tabela da [§7](#7-como-atualizar).
+3. Não use sufixos informais como `final`, `v2`, `novo` ou `corrigido` no nome. Versão é histórico no Git.
+4. Um arquivo por frame (45 frames para as 30 telas lógicas + 1 capa).
 
-**Exemplos**
+**Exemplos reais na pasta**
 
 | Tela | Arquivo |
 |---|---|
-| 01 · Login e boas-vindas | `mobile/01-login-e-boas-vindas.png` |
-| 04 · Busca e resultados | `mobile/04-busca-e-resultados.png` |
-| 10 · Agendamento confirmado e protocolo | `mobile/10-agendamento-confirmado-e-protocolo.png` |
-| W12 · Catálogo de serviços | `web/W12-catalogo-de-servicos.png` |
-| W15 · Relatórios | `web/W15-relatorios.png` |
+| 01 · Login Gov.br (Mobile) | `Cidadão/Mobile/01 · Login Gov.br.png` |
+| W04 · Busca de serviços (Web) | `Cidadão/Web/04 · Busca de serviços · Web.png` |
+| 16 · Dashboard do Servidor | `Servidor/Tela · Dashboard do Servidor.png` |
+| 21 · Órgãos | `Administrador/Tela · Órgãos.png` |
+| 27 · Erro Gov.br | `Transversais/27 · Erro Gov.br.png` |
 
 ---
 
@@ -210,7 +213,7 @@ Antes de considerar a exportação concluída:
 ### 7.2 Passo a passo
 
 1. Exporte as telas alteradas (não é necessário reexportar o que não mudou, mas o PDF consolidado deve ser regenerado).
-2. Substitua os arquivos em `mobile/` ou `web/`.
+2. Substitua os arquivos na pasta correspondente (`Cidadão/Mobile/`, `Cidadão/Web/`, `Servidor/`, `Administrador/` ou `Transversais/`).
 3. Atualize o `manifest.json` com a nova data, versão e hash.
 4. Atualize a tabela da [§7.1](#71-registro-de-exportações).
 5. Rode a validação de links e de imagens quebradas.

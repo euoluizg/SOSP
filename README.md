@@ -20,7 +20,7 @@ A partir de uma busca em linguagem simples, o sistema entrega uma **ficha orient
 | **Protótipo Oficial (Figma)** | [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | 30 telas no total (15 cidadão web+mobile, 5 servidor, 6 admin e 4 transversais — 45 frames) |
 | **Protótipo Consolidado (PDF)** | [`sosp-prototipo-2026-11-01.pdf`](docs/design/exports/sosp-prototipo-2026-11-01.pdf) | PDF consolidado com a capa e os 45 frames exportados das 30 telas |
 | **Índice de Telas e Node IDs** | [`docs/design/README.md`](docs/design/README.md) | Mapeamento das 30 telas (45 frames) com RF, UC e `node-id` do Figma |
-| **Contrato da API (OpenAPI 3.1)** | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | Especificação REST versionada em `/api/v1` |
+| **Contrato da API (OpenAPI 3.0.3)** | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | Especificação REST versionada em `/api/v1` |
 | **Schema do Banco (DDL SQL)** | [`docs/database/schema.sql`](docs/database/schema.sql) | Modelo físico PostgreSQL 17 com 34 tabelas em `camelCase` |
 
 ---
@@ -35,7 +35,7 @@ Toda a engenharia do projeto está estruturada em **6 Pilares**, acompanhados de
 | [**Pilar 1 — Produto e Requisitos**](docs/01-product-specs.md) | Problema, personas, user stories, RF-01 a RF-14, RNFs, RNs, RS, critérios de aceite e matriz de divergências |
 | [**Pilar 2 — Design e UX**](docs/02-design-ux.md) | Princípios de design, jornadas, estados de interface, tokens, componentes, acessibilidade WCAG 2.1 AA e microcopy |
 | [**Pilar 3 — Arquitetura de Software**](docs/03-architecture.md) | Diagramas C4, monólito modular, fronteiras de contexto, segurança, integrações e topologia |
-| [**Pilar 4 — Dados e API**](docs/04-data-api.md) | Convenções `camelCase`, diagrama ER, catálogo de 34 tabelas, endpoints REST, paginação, erros (`RFC 9457`) e jobs assíncronos |
+| [**Pilar 4 — Dados e API**](docs/04-data-api.md) | Convenções `camelCase`, diagrama ER, catálogo de 34 tabelas, endpoints REST, paginação, erros (`RFC 7807`) e jobs assíncronos |
 | [**Pilar 5 — Engenharia, DevOps e Operação**](docs/05-engineering-devops.md) | Onboarding, variáveis de ambiente, Git Flow simplificado, estratégia de testes, CI/CD, observabilidade, backup e feature flags |
 | [**Pilar 6 — Gestão do Projeto**](docs/06-project-management.md) | Stakeholders, escopo do MVP, organização do time, Scrum + Kanban, cronograma por marcos, matriz de riscos e Definition of Ready |
 | [**Casos de Uso (`UC-01` a `UC-17`)**](docs/use-cases/README.md) | Especificação detalhada dos fluxos principais, alternativos, exceções e pós-condições |

@@ -322,7 +322,7 @@ Gravar um vídeo de **3 minutos** com a jornada completa, sem narração de tela
 
 - [ ] Confirmar que o protocolo criado na demo não ficou em estado inconsistente.
 - [ ] Remover a conta e o agendamento de demonstração, se forem descartáveis.
-- [ ] Registrar a data, a versão e o resultado da demo no [CHANGELOG](CHANGELOG.md).
+- [ ] Registrar a data, a versão e o resultado da demo no [CHANGELOG](../CHANGELOG.md).
 - [ ] Guardar as evidências (capturas, vídeo, logs) em `docs/design/exports/` ou no repositório.
 - [ ] Anotar as perguntas que não foram respondidas com segurança.
 - [ ] Atualizar o [Pilar 6 §9](06-project-management.md#9-riscos) se algum risco se materializou.

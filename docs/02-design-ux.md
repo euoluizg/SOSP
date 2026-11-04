@@ -243,7 +243,7 @@ Cada tela crítica precisa de quatro estados implementados e testados. "Não pre
 
 | Estado | Gatilho | O que aparece | Ação disponível | Regra |
 |---|---|---|---|---|
-| Sem login | CTA clicado | "Entre para agendar" com explicação | Entrar com Gov.br | Retorno preservado |
+| Sem login | CTA clicado | "Entre para agendar" com explicação | Entrar com CPF e senha (ou ver aviso Gov.br) | Retorno preservado |
 | Loading de slots | Data escolhida | Skeleton de horários | Trocar data | — |
 | Slots disponíveis | Dia com vagas | Grade de horários de 30 min | Escolher horário | Horários lotados ausentes, não desabilitados |
 | Dia sem vagas | Feriado ou lotado | "Não há horários neste dia." | Escolher outra data | Destacar próximas datas com vaga |
@@ -475,7 +475,7 @@ O Design System usa o prefixo `.sosp-` e modificadores com dois hífens (`sosp-b
 | 39 | Mapa | `.sosp-map` | embed, static | loading, ready, unavailable | Onde fazer |
 | 40 | Banner de cookies | `.sosp-cookie` | — | visible, hidden | LGPD |
 
-> São 40 componentes no inventário consolidado. O documento de Design System registra 37 componentes na versão 1.1; os itens 38 a 40 entram com o RF-10, o bloco de mapa e o banner de cookies.
+> **17 componentes base e 40 itens no inventário detalhado:** a capa e a página `01 · Design System` do Figma organizam o sistema em **17 famílias de componentes base** (Botões, Campos/Inputs, Seletores, Busca, Chips/Tags/Badges, Cards, Tabelas/Listas, Paginação, Navegação/Tabs/Breadcrumb, Accordion, Modais/Drawers, Alertas/Toasts/Erros, Estados de Loading/Vazio, Stepper/Timeline, Layout/Header/Footer/Sidebar, Indicadores/Gráficos e Upload), que se desdobram nos **40 itens granulares** listados na tabela acima (sendo 37 no catálogo da v1.1 e os itens 38 a 40 previstos para o RF-10, o bloco de mapa e o banner de cookies).
 
 ### 6.2 Anatomia de um card de serviço
 
@@ -688,7 +688,7 @@ Meta: **WCAG 2.1 nível AA** e **eMAG**. Acessibilidade é critério de aceite, 
 |---|---|
 | **Fonte visual** | O protótipo oficial é o [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1), com 30 telas (15 cidadão web com suporte mobile, 5 servidor, 6 administrativas e 4 transversais — 45 frames); o índice está em [design/README.md](design/README.md) |
 | **Fonte única de token** | Tokens em `DesignSystem/css/tokens.css`; componentes em `components.css`; nenhum valor hex solto em página |
-| **Antes de criar, procurar** | Verificar os 40 componentes e as 30 telas antes de propor um novo |
+| **Antes de criar, procurar** | Verificar os 17 componentes base (40 itens detalhados no inventário) e as 30 telas antes de propor um novo |
 | **Versionamento** | Mudança de token é minor; remoção ou renome é major |
 | **Revisão obrigatória** | Todo componente novo passa por design + acessibilidade + front-end |
 | **Documentação viva** | Storybook é o catálogo; a documentação em Markdown aponta para ele |
@@ -732,8 +732,8 @@ O Figma `SOSP` é a **fonte oficial de aparência**. Ele contém **30 telas no t
 | [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | Aparência e conteúdo de tela | Vale para aparência |
 | [Índice de telas](design/README.md) | Numeração estável, RF/UC, status e `node-id` | Diz onde a tela está e por que existe |
 | [Pilar 1](01-product-specs.md) | Comportamento, regra e escopo | Vale o requisito |
-| [`Prototipo/rf006_*.html`](../../Prototipo/) | Prova de implementação do recorte RF-06 | Não é fonte; é artefato derivado |
-| [`DesignSystem/index.html`](../../DesignSystem/index.html) | Catálogo de tokens e componentes | Vale para token e componente |
+| `Prototipo/rf006_*.html` | Prova de implementação do recorte RF-06 | Não é fonte; é artefato derivado |
+| `DesignSystem/index.html` | Catálogo de tokens e componentes | Vale para token e componente |
 
 **Regras de uso:**
 

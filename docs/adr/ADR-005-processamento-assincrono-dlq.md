@@ -129,4 +129,4 @@ Aumentaria escopo, exigiria VAPID, consentimento e tratamento de inscrições ex
 - [Pilar 3 §7 — Comunicação assíncrona](../03-architecture.md#7-comunicação-assíncrona-e-integrações)
 - [Pilar 4 §7 — Comunicação assíncrona e resiliência](../04-data-api.md#7-comunicação-assíncrona-e-resiliência)
 - [Pilar 5 §7.3.4 — Fila acumulada, PDF falhando ou DLQ](../05-engineering-devops.md#734-fila-acumulada-pdf-falhando-ou-dlq)
-- [ADR-006 — Armazenamento S3/MinIO](ADR-006-armazenamento-s3-url-assinada.md)
+- [ADR-006 — Armazenamento S3/MinIO](ADR-006-armazenamento-s3-minio.md)

@@ -457,7 +457,7 @@ flowchart LR
 |---|---|---|
 | A1 | Serviço sem unidade presencial | Exibe apenas o canal online e o link externo |
 | A2 | Múltiplas unidades | Lista todas, com endereço, horário e acessibilidade; o mapa mostra a selecionada |
-| A3 | Cidadão não autenticado escolhe Agendar | Redireciona ao Gov.br e retorna à ficha com a intenção preservada (D6) |
+| A3 | Cidadão não autenticado escolhe Agendar | Redireciona à tela de login local (CPF + senha) e retorna à ficha com a intenção preservada (D6) |
 | A4 | Serviço com avaliações habilitadas | Exibe média e contagem somente com a flag do RF-10 ligada (RN-11) |
 
 **Exceções**

@@ -46,7 +46,7 @@ O **SOSP — Sistema de Orientação para Serviços Públicos** é um ponto de e
 | [ADR-003](adr/ADR-003-autenticacao-govbr-rbac.md) | Autenticação local CPF+senha (MVP) e Gov.br OIDC (v2.0), login interno e RBAC | Antes de alterar autenticação ou permissão |
 | [ADR-004](adr/ADR-004-git-flow-simplificado.md) | Git Flow simplificado (`main` + `develop`) em monorepo | Antes de criar branch ou release |
 | [ADR-005](adr/ADR-005-processamento-assincrono-dlq.md) | Fila Redis, workers, PDF e DLQ | Antes de criar tarefa assíncrona |
-| [ADR-006](adr/ADR-006-armazenamento-s3-url-assinada.md) | S3/MinIO com URL assinada | Antes de armazenar ou servir arquivo |
+| [ADR-006](adr/ADR-006-armazenamento-s3-minio.md) | S3/MinIO com URL assinada | Antes de armazenar ou servir arquivo |
 | [ADR-007](adr/ADR-007-feature-flags.md) | Feature flags para RF-10, RF-13 e painel de avaliações | Antes de ligar funcionalidade fora do MVP |
 | [ADR-008](adr/ADR-008-supabase-postgresql-gerenciado.md) | Supabase como PostgreSQL gerenciado em São Paulo | Antes de configurar staging, produção ou backup |
 | [`openapi.yaml`](api/openapi.yaml) | Contrato REST versionado em `/api/v1` | Ao criar ou consumir endpoint |
@@ -67,7 +67,7 @@ Quando dois artefatos divergirem, a precedência é a abaixo. A ordem vale para 
 | 3 | **Contrato** — [`openapi.yaml`](api/openapi.yaml) e [`schema.sql`](database/schema.sql) | Forma do dado, nomes de campos, status HTTP e constraints | O portal espera `protocolNumber`; o contrato define o nome e o tipo. |
 | 4 | **Arquitetura** — [Pilar 3](03-architecture.md) | Fronteiras, fluxos, topologia e responsabilidades | O Pilar 3 diz que o portal não acessa o banco; uma implementação que acessa está errada. |
 | 5 | **Figma** — [protótipo oficial](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | Aparência, hierarquia visual, espaçamento e conteúdo de tela | O Figma mostra um botão a mais; se o requisito não o prevê, ele não entra. |
-| 6 | **Protótipo HTML** — [`Prototipo/`](../Prototipo/) | Referência técnica de implementação do recorte RF-06 | O HTML é derivado; não é fonte de requisito nem de design. |
+| 6 | **Protótipo HTML** — `Prototipo/` | Referência técnica de implementação do recorte RF-06 | O HTML é derivado; não é fonte de requisito nem de design. |
 
 **Regras de aplicação**
 
@@ -85,8 +85,8 @@ Quando dois artefatos divergirem, a precedência é a abaixo. A ordem vale para 
 |---|---|---|
 | Protótipo oficial no Figma | <https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1> | **Acesso somente visualização**; não requer conta paga |
 | Índice das 30 telas | [docs/design/README.md](design/README.md) | 30 telas (15 cidadão web+mobile, 5 servidor, 6 admin, 4 transversais — 45 frames no Figma) |
-| Protótipo HTML do RF-06 | [`Prototipo/`](../Prototipo/) | Artefato técnico derivado; abrir `rf006_busca.html` e `rf006_ficha.html` |
-| Design System | [`DesignSystem/index.html`](../DesignSystem/index.html) | Catálogo vivo de tokens e componentes |
+| Protótipo HTML do RF-06 | `Prototipo/` | Artefato técnico derivado; abrir `rf006_busca.html` e `rf006_ficha.html` |
+| Design System | `DesignSystem/index.html` | Catálogo vivo de tokens e componentes |
 | Exportações do protótipo | [`docs/design/exports/`](design/exports/) | PNG/PDF com data de exportação |
 | Repositório | `https://github.com/euoluizg/SOSP` | Repositório oficial do monorepo (main + develop) |
 
@@ -127,7 +127,7 @@ Quando dois artefatos divergirem, a precedência é a abaixo. A ordem vale para 
 1. [Pilar 2](02-design-ux.md) inteiro.
 2. [Índice de telas](design/README.md) e o [Figma oficial](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1).
 3. [Pilar 1 §2 e §3](01-product-specs.md#2-personas) para personas e histórias.
-4. [Design System](../DesignSystem/index.html) para tokens e componentes.
+4. `DesignSystem/index.html` e a página `01 · Design System` do Figma para tokens e componentes.
 5. [Pilar 1 §7](01-product-specs.md#7-matriz-de-divergências) para as divergências de design em aberto.
 
 ### 6.3 Professor ou avaliador

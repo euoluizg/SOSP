@@ -44,8 +44,8 @@ Um arquivo Figma sem índice é uma coleção de frames. O índice faz três coi
 | [Pilar 1](../01-product-specs.md) | Comportamento, regra e escopo | **Vale o requisito** |
 | [Pilar 2](../02-design-ux.md) | Princípios, tokens, componentes e estados | Vale para decisão de design |
 | **Figma** | Aparência, hierarquia, espaçamento e conteúdo de tela | Vale para aparência |
-| [`Prototipo/`](../../Prototipo/) | Implementação HTML do recorte RF-06 | Não é fonte; é artefato derivado |
-| [`DesignSystem/`](../../DesignSystem/index.html) | Catálogo vivo de tokens e componentes | Vale para componente e token |
+| `Prototipo/` | Implementação HTML do recorte RF-06 | Não é fonte; é artefato derivado |
+| `DesignSystem/` | Catálogo vivo de tokens e componentes | Vale para componente e token |
 
 **Regra:** o índice não substitui o Figma. Ele diz **onde** cada tela está e **por que** existe. A aparência continua sendo lida no arquivo.
 
@@ -59,7 +59,7 @@ Um arquivo Figma sem índice é uma coleção de frames. O índice faz três coi
 2. Abra o nó no Figma pelo link da coluna **Node ID**.
 3. Leia o UC correspondente em [Casos de uso](../use-cases/README.md) para o comportamento.
 4. Leia o [Pilar 2 §4](../02-design-ux.md#4-matriz-de-estados-de-interface) para os estados de interface.
-5. Confira os tokens no [Design System](../../DesignSystem/index.html); não invente cor, espaçamento ou tipografia.
+5. Confira os tokens no [Pilar 2 §5](../02-design-ux.md#5-design-tokens) e na página `01 · Design System` do Figma; não invente cor, espaçamento ou tipografia.
 
 ### 2.2 Para revisar design
 

@@ -1,0 +1,17 @@
+# ==============================================================================
+# SOSP — Proprietários de Código e Documentação (CODEOWNERS)
+# Referência: docs/adr/ADR-004-git-flow-simplificado.md
+# ==============================================================================
+
+# Padrão global do repositório
+*                               @euoluizg
+
+# Documentação, Contrato de API e Schema de Banco (exigem revisão conjunta)
+/docs/                          @euoluizg
+/docs/api/openapi.yaml          @euoluizg
+/docs/database/schema.sql       @euoluizg
+
+# Camadas de aplicação (quando inicializadas)
+/portal/                        @euoluizg
+/backend/                       @euoluizg
+
