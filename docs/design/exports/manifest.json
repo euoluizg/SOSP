@@ -1,12 +1,12 @@
 {
-  "exportedAt": "2026-11-01T21:38:00-03:00",
+  "exportedAt": "2026-11-05T16:13:05-03:00",
   "figmaFile": "P8Pf9aZiagXQulJpP2guqz",
-  "figmaVersion": "v1.0 (2416288953332883055)",
+  "figmaVersion": "v1.2 (2026-11-05 - Reformulação de Telas)",
   "cover": {
     "name": "Capa / SOSP — Design System e Telas",
     "nodeId": "5:445",
     "file": "capa-sosp.png",
-    "sha256": "79473fbe637fec5f98e8ce88b7518d79929b82ebff3457d81d923aa02e256b12"
+    "sha256": "11a3a04c9fed654976f4a8fc4b609dbdb2e6910a4d739d71dc1fe3dbacf8cfd0"
   },
   "totalLogicalScreens": 30,
   "totalExportedFrames": 45,
@@ -17,7 +17,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "8:172",
       "file": "Cidadão/Mobile/01 · Login Gov.br.png",
-      "sha256": "0ec776fb1698db879ba22d8f79caacbbb3d64eade05c7b1c7416d1db3707f231"
+      "sha256": "8ff7f024a8b2394e052d1387c0336b11dfc0b846de1285e1c6766d83a317e353"
     },
     {
       "id": "02",
@@ -25,7 +25,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "8:217",
       "file": "Cidadão/Mobile/02 · Cadastro.png",
-      "sha256": "f3c470d0e639dbc27a3b1c7a03544c4f54dee4fbd6c5f01c5a382580422128a0"
+      "sha256": "43204f504201d1a1ec9b1bcb5d9dab7c4eac2194577ebf20af5d0b3f1e1ab6d0"
     },
     {
       "id": "03",
@@ -33,7 +33,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "8:292",
       "file": "Cidadão/Mobile/03 · Home.png",
-      "sha256": "c42702cf87ebc0f4cd68c2b9040db0ebd4228c9263ad615f65a280566665d0d3"
+      "sha256": "a1caec83fb87d368829229d14c483e6e23bf72a5bad217d04a53bb939721d6a4"
     },
     {
       "id": "04",
@@ -41,7 +41,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "8:459",
       "file": "Cidadão/Mobile/04 · Busca.png",
-      "sha256": "dd48469821b76806b2225988ddef9b99d81a05c5d0b673db210a9dec649e6f16"
+      "sha256": "c7875b44174e1a8c37be6f2575877273f0c9781ae3e34dda92e2894f06e5a13d"
     },
     {
       "id": "05",
@@ -49,7 +49,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "8:571",
       "file": "Cidadão/Mobile/05 · Ficha do serviço.png",
-      "sha256": "bdae4cb8d03bbb4aa58fce64fa711be7f06b1ea06552e29c28bd77134dc65a25"
+      "sha256": "74f5398acccf5c49c9a92ccc8dc5f9d3191316d1c7b305ed5d342341fad0aa71"
     },
     {
       "id": "06",
@@ -57,7 +57,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:105",
       "file": "Cidadão/Mobile/06 · Variação do serviço.png",
-      "sha256": "84c530477fca125ddb9be14bf91253bde99bd48d7c31f553ed34cbe27b3eb41f"
+      "sha256": "e2bd64e10ff79ac6298cb50badeca30a4faaad0519f95f0598cde7c0a715c208"
     },
     {
       "id": "07",
@@ -65,7 +65,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:194",
       "file": "Cidadão/Mobile/07 · Guia e checklist.png",
-      "sha256": "52756db25ed83672a3fce40cdc3ef0b98d36c1b12d907dd524c85355b9b358b1"
+      "sha256": "49e022ccb431192ca928b39c846a219f13bcc632890bacd85d7cfc49dc8e17d9"
     },
     {
       "id": "08",
@@ -73,7 +73,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:310",
       "file": "Cidadão/Mobile/08 · Alerta PCD _ Idoso.png",
-      "sha256": "dcbb03e5e43441415d8aa03f6aa4d215a4010be851f7a2ae399e555be6a47fd7"
+      "sha256": "0773b7b0c068f96648b8b16d18556be426e0ee9a2bf78b12ddcfeb049deab455"
     },
     {
       "id": "09",
@@ -81,7 +81,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:389",
       "file": "Cidadão/Mobile/09 · Agendamento.png",
-      "sha256": "b5b3c45fd8f9a2e7d8bc60c5fc9a21493d26af69f44b566ba255f2394275e55f"
+      "sha256": "2b895b8db9baf6f4a809ee918dc5a82cf93ec17b22966d7611853a7b80551e74"
     },
     {
       "id": "10",
@@ -89,7 +89,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:572",
       "file": "Cidadão/Mobile/10 · Meus pedidos.png",
-      "sha256": "e41f56b95c76080a9075a81b0b51b48ae5e057abeeb74770e4ca297bb13e196d"
+      "sha256": "e255ddfb895b7a7cdae9be84ddca00c43902c3147d079d428becc5edc7d53662"
     },
     {
       "id": "11",
@@ -97,7 +97,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:741",
       "file": "Cidadão/Mobile/11 · Anexar documento.png",
-      "sha256": "c71e0606e2479923975f93abe3d1f87706e101779a6d2cfde97b89c7c57f58cd"
+      "sha256": "8eef4c3f78086cdfcf37914c18dfc809edc61575c99746b8468d6d4c5dd5de90"
     },
     {
       "id": "12",
@@ -105,7 +105,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:818",
       "file": "Cidadão/Mobile/12 · Avaliação.png",
-      "sha256": "11ddec729a8b7c3c0f9c954832fbcb29783411285e839f6cb6c208369ee837cb"
+      "sha256": "fa83aa3d81237ff6eacc918c56dcf8aa7d650f9b7f8981ff983b45b41c381f78"
     },
     {
       "id": "13",
@@ -113,7 +113,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:896",
       "file": "Cidadão/Mobile/13 · FAQ _ Assistente.png",
-      "sha256": "43748ba95f7575809d74d4c263f20770f4e1b93179b9ef6e5682b85b82be224d"
+      "sha256": "d0db373752cab6fcaec127f9b617ad858c57ea08947ee383c866bf2a9a377f1f"
     },
     {
       "id": "14",
@@ -121,7 +121,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:986",
       "file": "Cidadão/Mobile/14 · Preferências.png",
-      "sha256": "0686e4aeac80b8a72f57989060440045fe2b9e785904c5b47e4c2d17b4394cc6"
+      "sha256": "05f07e4b3e81ee76b500999284a1471f4a4d2edcf0ad98e7a2e6f444dc41d17e"
     },
     {
       "id": "15",
@@ -129,7 +129,7 @@
       "platform": "cidadão-mobile",
       "nodeId": "7:1098",
       "file": "Cidadão/Mobile/15 · Perfil.png",
-      "sha256": "59208b4719a2804130886a4401e649ee6c72f398c0a2649a6dd0da3e513d1fea"
+      "sha256": "e6cb5722792652a7eb92a34c4425a691f264192c8acfe329d67fdeca197fe039"
     },
     {
       "id": "W01",
@@ -137,7 +137,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:11658",
       "file": "Cidadão/Web/01 · Login Gov.br · Web.png",
-      "sha256": "5d18b3a82ae138b1c6ddaf71599578ab6d157df48ac4382e93e8a99cca236f34"
+      "sha256": "8826dc15c146026c9011486dd3d9b289bde68f7878af2845247bb9f5f0d312c7"
     },
     {
       "id": "W02",
@@ -145,7 +145,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:11756",
       "file": "Cidadão/Web/02 · Criar conta · Web.png",
-      "sha256": "0fb00abac483b7b46716f2463803f92096cd366807d9aecfad4b3a1710dd9db2"
+      "sha256": "deedad71e9603ec2e9e7a2a20e43c88429cac65e080d58d7b5f751cafc585a9d"
     },
     {
       "id": "W03",
@@ -153,7 +153,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:11882",
       "file": "Cidadão/Web/03 · Home do Cidadão · Web.png",
-      "sha256": "e9abe1d5592f52ad16a7ec38658c71d01750b298cb6f117ac7ea5e76a0887fa3"
+      "sha256": "f1a6a0e79f72c6e2d49049225ac97745ed5fab41fb70fe4989cf428c2fa12161"
     },
     {
       "id": "W04",
@@ -161,7 +161,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12065",
       "file": "Cidadão/Web/04 · Busca de serviços · Web.png",
-      "sha256": "556492b2f159c21fcb428b5bb978c049f415f71398ac89989a4db14d7a8dc0f0"
+      "sha256": "ff74bdba778bec9b8c0f49252db6a8a33e5ed200e8224b1d337eefd4986c68d5"
     },
     {
       "id": "W05",
@@ -169,7 +169,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12265",
       "file": "Cidadão/Web/05 · Ficha do serviço · Web.png",
-      "sha256": "df6ba91e600fda4cb0947da4f4ea1ea2578b6c49238bdd3059ccdedac327b481"
+      "sha256": "7d1bb2d3553e1cc8836caa956dafe442a8361a5f1696a5e588d8ac55d5f56f4e"
     },
     {
       "id": "W06",
@@ -177,7 +177,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12421",
       "file": "Cidadão/Web/06 · Variação do serviço · Web.png",
-      "sha256": "a393b74454cf1042c60e4ce41f588db54b2efa1f07d6c716fc06d95b5984c507"
+      "sha256": "1e14531284ee4e1822f6a1d9c07edac8a32c109af68bea434db7b070a424043f"
     },
     {
       "id": "W07",
@@ -185,7 +185,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12582",
       "file": "Cidadão/Web/07 · Guia e checklist · Web.png",
-      "sha256": "89cca487df712abc57e12dd8e8b42988f8ce0a87c3cd4c0276eb0b7bc1898919"
+      "sha256": "9ea90b9921226bf16c4cfdc3fe7d6c0c9414c9910d03a61db5a176d2c82425e6"
     },
     {
       "id": "W08",
@@ -193,7 +193,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12760",
       "file": "Cidadão/Web/08 · Alerta PCD - Idoso · Web.png",
-      "sha256": "b7574c760ba2e2ce804cc427e54472fc2d80a91db10d6c35a692e48d899de325"
+      "sha256": "aae546988c971c0bc1cde136ec6c31583254c918ffee4e450b9c9771d689cd67"
     },
     {
       "id": "W09",
@@ -201,7 +201,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:12912",
       "file": "Cidadão/Web/09 · Agendamento · Web.png",
-      "sha256": "3ea06a08d396f2a4dc8ee871ad43551567a5043102d7fca70bb46c61fabf656a"
+      "sha256": "16a6e08251e833519d6b9c174cf5bcb91c3c0e258acec70d8ee829640bce83c1"
     },
     {
       "id": "W10",
@@ -209,7 +209,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:13141",
       "file": "Cidadão/Web/10 · Confirmação · Web.png",
-      "sha256": "fb26dd734fc3efb097f5098a9454aa774977bedf61dae5b4020577dc3b0536c7"
+      "sha256": "63f19b22787383a3a4281aa2d9b3931858001fef1b2865b0ba775ab45fdf114e"
     },
     {
       "id": "W11",
@@ -217,7 +217,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:13404",
       "file": "Cidadão/Web/11 · Anexar documento · Web.png",
-      "sha256": "1c586c5713157819de8fe8d94067ab5313d22fd31a04e557b94ffb53aa4cdd16"
+      "sha256": "eb47021b7f1bfd9e225b9d555f830f88a517dacd5a448c1c6d25ea3ebdfeef69"
     },
     {
       "id": "W12",
@@ -225,7 +225,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:13545",
       "file": "Cidadão/Web/12 · Avaliação · Web.png",
-      "sha256": "2fdbf6ec38949da48bdd16bb3cb3d69409234f7d311b48fbf43bcaee600eed07"
+      "sha256": "dac306829e691a94e3fa9215ba546e1f6ef3dfdc755162bc722d59cd8ca80f37"
     },
     {
       "id": "W13",
@@ -233,7 +233,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:13720",
       "file": "Cidadão/Web/13 · FAQ e Assistente · Web.png",
-      "sha256": "699d7f6459265338279aab58edd0a520d7fb96002d36da7335d1b596fae364aa"
+      "sha256": "d0ebeaf76c705d7a500125f34f2d16cfeefcb6f1e2dd4e34aa8448732a574e5e"
     },
     {
       "id": "W14",
@@ -241,7 +241,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:13889",
       "file": "Cidadão/Web/14 · Preferências · Web.png",
-      "sha256": "c0b76339ea119d129ae60f1d62f91d84aecc8331b29c5984ee05f40235c87e68"
+      "sha256": "cb87f2475051a77d487ef3a55225b0d374823bf7cccb150650a14075438cd4b7"
     },
     {
       "id": "W15",
@@ -249,7 +249,7 @@
       "platform": "cidadão-web",
       "nodeId": "7:14044",
       "file": "Cidadão/Web/15 · Acompanhamento · Web.png",
-      "sha256": "10768bdf884ed1ce0d38a0e507262097d8a1798350b37f7f9f4ae82f95377ed6"
+      "sha256": "1959ebe58853f0006366eb911f1f92e448725fe7e03d33a10f013ada10aaee1f"
     },
     {
       "id": "16",
@@ -257,7 +257,7 @@
       "platform": "servidor-web",
       "nodeId": "7:1269",
       "file": "Servidor/Tela · Dashboard do Servidor.png",
-      "sha256": "afa9c903d6decae158525520c54e17c5927af686df6b307438f2f99d4e84bf8c"
+      "sha256": "4d3ec83f4b22624d8ed93c6c276660c149e1cd9481a5843f533c867e5797d079"
     },
     {
       "id": "17",
@@ -265,7 +265,7 @@
       "platform": "servidor-web",
       "nodeId": "7:1742",
       "file": "Servidor/Tela · Gerenciar Agendamentos.png",
-      "sha256": "1eb66e9686777d8fc71b0e09c06b34ecb1a9a58a1729b2cf591a3497c3e38670"
+      "sha256": "915dc7f3d4bc10355f711236f7771b5757b03945228e09bbe451c474368365e2"
     },
     {
       "id": "18",
@@ -273,7 +273,7 @@
       "platform": "servidor-web",
       "nodeId": "7:2177",
       "file": "Servidor/Tela · Atender Protocolos.png",
-      "sha256": "76c08746d55de8b82253fce2e90fbc2020e1297d3044bb37dd03b030a483ccfc"
+      "sha256": "2486729213284cec7cbbcdd727020d052af9e0dd31b0698bdd7b87aac4a9feb1"
     },
     {
       "id": "19",
@@ -281,7 +281,7 @@
       "platform": "servidor-web",
       "nodeId": "7:2538",
       "file": "Servidor/Tela · Catálogo de Serviços.png",
-      "sha256": "de44e46fe1a77dd8c1c6a20358da4515c1a00448ba059d15445a1d3869131dc4"
+      "sha256": "a863d6406dff4ffe27b91975b5e5ef4173dd86b34d66bf0930c9d0f0aa280ba6"
     },
     {
       "id": "20",
@@ -289,7 +289,7 @@
       "platform": "servidor-web",
       "nodeId": "7:2981",
       "file": "Servidor/Tela · Relatórios Gerenciais.png",
-      "sha256": "1c2954f8866cb83b21fe13a2d579dc2d5bd4cf7ce21d5a52081911423d2f73f1"
+      "sha256": "61b5f91e471890abcacaccf443ca878605d696f46fe2473f1b964ff0b749aaa2"
     },
     {
       "id": "21",
@@ -297,7 +297,7 @@
       "platform": "administrador-web",
       "nodeId": "7:3322",
       "file": "Administrador/Tela · Órgãos.png",
-      "sha256": "aa9a0f0c49f52fc672f63f1787b37b084586138eba15265c016236754590efc0"
+      "sha256": "208193174c8f6f68de1d4b77f08c7c2aae2e44d1e70a097b52bc12e8996b515f"
     },
     {
       "id": "22",
@@ -305,7 +305,7 @@
       "platform": "administrador-web",
       "nodeId": "7:3821",
       "file": "Administrador/Tela · Unidades.png",
-      "sha256": "1a2aa1f06edf18bd55cbb2ee16949832905c50243087861cf8fd19bea9986e0e"
+      "sha256": "799913c3448af53faf2384837d4f63b49a8177bbff583d963d9c166b70c3a1c8"
     },
     {
       "id": "23",
@@ -313,7 +313,7 @@
       "platform": "administrador-web",
       "nodeId": "7:4300",
       "file": "Administrador/Tela · Catálogo Global.png",
-      "sha256": "37dafc1d4413f8c2e4acfd1139dc42a64b764ebb152514912432b10f65b42761"
+      "sha256": "b84794fa4bc9f80b789fa54fc098e56f7f81491ddba554201fc2bb1cf6acec81"
     },
     {
       "id": "24",
@@ -321,7 +321,7 @@
       "platform": "administrador-web",
       "nodeId": "7:4780",
       "file": "Administrador/Tela · Usuários Internos.png",
-      "sha256": "891a879f4c2046733c1f7dd69c61e90581b0cdee6275ef555af817767acc5dc8"
+      "sha256": "0b098b8fa75959407e87b9ebbcd900a968e60df25d3c8245cecd689ccf8c369a"
     },
     {
       "id": "25",
@@ -329,7 +329,7 @@
       "platform": "administrador-web",
       "nodeId": "7:6630",
       "file": "Administrador/Tela · FAQ e Conteúdo.png",
-      "sha256": "6269f3488aed6fd27ca5ec137c0dbb95585badfa80917a7e78d27b12607485e1"
+      "sha256": "7afc17a79b18175e02d63363294a58159209e2b599ea6fc01acf772f446bf826"
     },
     {
       "id": "26",
@@ -337,7 +337,7 @@
       "platform": "administrador-web",
       "nodeId": "7:7074",
       "file": "Administrador/Tela · Relatórios e Auditoria.png",
-      "sha256": "507115cccc034d8ca97a94bee9548910d18b2d18fc78d669ac0eafd024dd3120"
+      "sha256": "40370b701c6bba62a06269e7bc1e6abbc6919decf406380ffdbb467dc027857c"
     },
     {
       "id": "27",
@@ -345,7 +345,7 @@
       "platform": "transversais-web",
       "nodeId": "7:7578",
       "file": "Transversais/27 · Erro Gov.br.png",
-      "sha256": "b07abf09e534e87f89ade08c9f524148491ecdaf11a630b98713f383c8d478ab"
+      "sha256": "70c997bec1d537b3695ab373a9c00fd92773b3e8deb85a399c0479921f4826b0"
     },
     {
       "id": "28",
@@ -353,7 +353,7 @@
       "platform": "transversais-web",
       "nodeId": "7:7675",
       "file": "Transversais/28 · Sessão Expirada.png",
-      "sha256": "c838c5fe85e55a8e8095c036f478edaca37ed78b74188971d1b67721e21e1b84"
+      "sha256": "72b6de02b76608e73f55220b86d435708e7092864b8d228291245a4276b3ba48"
     },
     {
       "id": "29",
@@ -361,7 +361,7 @@
       "platform": "transversais-web",
       "nodeId": "7:7801",
       "file": "Transversais/29 · Confirmações Críticas.png",
-      "sha256": "f0420eefcc9689f0e8786313b3c1564be8cd3550c84ad6dad91d3e87921f4334"
+      "sha256": "0fd09780bdb73d7faf60db58ddf02c53305de852ca534352bebb1107783d21c9"
     },
     {
       "id": "30",
@@ -369,7 +369,7 @@
       "platform": "transversais-web",
       "nodeId": "7:8181",
       "file": "Transversais/30 · Visualização de PDFs.png",
-      "sha256": "c761276f21fb718485844b0fada635d83d3fe9f4185f57ef765a403270184ba8"
+      "sha256": "6cdfcf872436355632515ca89e56fa12f53463823ef609246f7700ad923f82ad"
     }
   ]
 }

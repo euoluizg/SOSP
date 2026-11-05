@@ -45,13 +45,13 @@ O Figma é a fonte oficial de aparência. Esta pasta guarda **cópias datadas** 
 
 | Campo | Valor |
 |---|---|
-| **Última exportação oficial** | `01/11/2026` |
+| **Última exportação oficial** | `05/11/2026` |
 | **Responsável pela exportação** | Luiz Gustavo |
-| **Versão do arquivo Figma** | `v1.0` (`2416288953332883055`) |
+| **Versão do arquivo Figma** | `v1.2` (`Reformulação de Telas — 05/11/2026`) |
 | **Telas exportadas** | **30 de 30 telas** (45 frames + 1 capa) |
-| **Formato** | PNG 1× organizado por perfil + PDF consolidado ([`sosp-prototipo-2026-11-01.pdf`](sosp-prototipo-2026-11-01.pdf)) |
+| **Formato** | PNG 2× organizado por perfil + PDF consolidado ([`sosp-prototipo-2026-11-05.pdf`](sosp-prototipo-2026-11-05.pdf)) |
 
-> **Status:** exportação oficial **concluída**. Todos os PNGs, o [`manifest.json`](manifest.json) com hashes `sha256` e o PDF consolidado ([`sosp-prototipo-2026-11-01.pdf`](sosp-prototipo-2026-11-01.pdf)) estão gerados e versionados nesta pasta.
+> **Status:** exportação oficial **concluída e atualizada**. Todos os 45 frames (escala 2×), a capa, o [`manifest.json`](manifest.json) com hashes `sha256` e o PDF consolidado ([`sosp-prototipo-2026-11-05.pdf`](sosp-prototipo-2026-11-05.pdf)) estão gerados e sincronizados com o novo design do Figma.
 
 **Exportação por nó:** com os `node-id` das 30 telas (45 frames) preenchidos no [índice](../README.md), a exportação foi consolidada por perfil (`Cidadão/Mobile`, `Cidadão/Web`, `Servidor`, `Administrador` e `Transversais`), acompanhada do arquivo de capa [`capa-sosp.png`](capa-sosp.png).
 
@@ -154,7 +154,7 @@ docs/design/exports/
 ├── README.md
 ├── capa-sosp.png                 # Capa oficial do SOSP no Figma (Node ID 5:445)
 ├── manifest.json                 # Manifesto com nodeId e hash SHA-256 de todas as telas
-├── sosp-prototipo-2026-11-01.pdf # PDF consolidado (Capa + 45 frames com rodapé)
+├── sosp-prototipo-2026-11-05.pdf # PDF consolidado (Capa + 45 frames com rodapé)
 ├── Cidadão/
 │   ├── Mobile/                   # 15 telas mobile do cidadão (01 a 15 — 390px)
 │   │   ├── 01 · Login Gov.br.png
@@ -189,7 +189,7 @@ Antes de considerar a exportação concluída:
 - [x] As 30 telas foram exportadas (45 frames: 15 mobile do cidadão + 15 web do cidadão + 5 servidor + 6 administrativas + 4 transversais).
 - [x] Cada arquivo está organizado em sua respectiva pasta por perfil (`Cidadão/Mobile`, `Cidadão/Web`, `Servidor`, `Administrador`, `Transversais`).
 - [x] Nenhum arquivo está corrompido ou em branco.
-- [x] A ordem do PDF consolidado ([`sosp-prototipo-2026-11-01.pdf`](sosp-prototipo-2026-11-01.pdf)) é a do índice.
+- [x] A ordem do PDF consolidado ([`sosp-prototipo-2026-11-05.pdf`](sosp-prototipo-2026-11-05.pdf)) é a do índice.
 - [x] A capa do PDF tem versão, data e link do Figma.
 - [x] O rodapé de cada página identifica a tela, o `Node ID` e a data.
 - [x] O [`manifest.json`](manifest.json) foi gerado e confere com os arquivos.
@@ -206,7 +206,8 @@ Antes de considerar a exportação concluída:
 
 | Data | Responsável | Versão do Figma | Telas | Formato | Observação |
 |---|---|---|---|---|---|
-| 01/11/2026 | Luiz Gustavo | `v1.0` (`2416288953332883055`) | 30/30 (45 frames) | PNG + PDF | Exportação completa concluída (`manifest.json` + `sosp-prototipo-2026-11-01.pdf`) |
+| 05/11/2026 | Luiz Gustavo | `v1.2` (`Reformulação de Telas`) | 30/30 (45 frames) | PNG 2× + PDF | Exportação completa atualizada com o novo design (`manifest.json` + `sosp-prototipo-2026-11-05.pdf`) |
+| 01/11/2026 | Luiz Gustavo | `v1.0` (`2416288953332883055`) | 30/30 (45 frames) | PNG + PDF | Exportação completa inicial (`manifest.json` + `sosp-prototipo-2026-11-01.pdf`) |
 
 **Regra:** toda exportação gera uma linha nesta tabela. A linha mais recente é a versão de referência da apresentação.
 
