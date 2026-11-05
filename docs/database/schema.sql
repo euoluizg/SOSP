@@ -59,7 +59,7 @@ CREATE TABLE accountsGender (
 
 CREATE TABLE accountsCitizen (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  cpf                   varchar(11) NOT NULL,
+  cpf                   varchar(11) UNIQUE NOT NULL,
   fullName              varchar(120) NOT NULL,
   birthDate             date NOT NULL,
   email                 varchar(200) NOT NULL,
