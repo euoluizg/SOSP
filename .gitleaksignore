@@ -1,0 +1,3 @@
+# Gitleaks ignore file
+# False positive: Example HTTP header 'Idempotency-Key: <UUID>' in documentation
+dbda95020e06f4fb7ba41df8da262ebd7ed0e3a7:docs/04-data-api.md:generic-api-key:1420
