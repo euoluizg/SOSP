@@ -10,16 +10,30 @@
 -- Contexto:
 --   O arquivo `schema.sql` já habilitou RLS em todas as 36 tabelas (ENABLE ROW LEVEL SECURITY).
 --   Sem políticas explícitas, o PostgreSQL adota "Default Deny" para roles não-owner.
---   Este arquivo complementa a autorização SQL, criando as políticas mínimas
---   necessárias para demonstrar os papéis `sosp_leitor_role` e `sosp_operador_role`.
+--   Este arquivo complementa a autorização SQL, criando as políticas necessárias
+--   para demonstrar os papéis `sosp_leitor_role` e `sosp_operador_role`, bem como
+--   o endurecimento de Views com `security_invoker = true`.
 --
 -- Regras de Segurança:
 --   - Nenhuma política permissiva aberta (USING true) sobre tabelas com dados pessoais;
 --   - Isolamento de registros inativos e excluídos logicamente (Soft Delete / RN-40);
---   - Defesa em Profundidade: GRANT de tabela é pré-requisito, RLS filtra as linhas.
+--   - Defesa em Profundidade: GRANT de tabela é pré-requisito, RLS filtra as linhas;
+--   - Views configuradas com security_invoker = true para impedir bypass de RLS.
 -- =============================================================================
 
 BEGIN;
+
+  -- ---------------------------------------------------------------------------
+  -- 0. ENDURECIMENTO DE VIEWS CONTRA BYPASS DE RLS (security_invoker = true)
+  -- ---------------------------------------------------------------------------
+  -- No PostgreSQL 15+, views por padrão executam como o proprietário (security_definer),
+  -- o que anularia o RLS das tabelas base para usuários leitores.
+  -- Ao marcar security_invoker = true, o PostgreSQL avalia os privilégios e as
+  -- políticas de RLS da sessão chamadora (invoker), bloqueando o vazamento de rascunhos.
+  -- ---------------------------------------------------------------------------
+
+  ALTER VIEW vw_catalogServiceSearch SET (security_invoker = true);
+  ALTER VIEW vw_schedulingSlotAvailability SET (security_invoker = true);
 
   -- ---------------------------------------------------------------------------
   -- 1. POLÍTICAS DE RLS: CATÁLOGO DE SERVIÇOS (catalogService)
@@ -166,6 +180,14 @@ BEGIN;
   -- 5. POLÍTICAS DE RLS: SINÔNIMOS DE BUSCA (searchSynonym)
   -- ---------------------------------------------------------------------------
 
+  -- Leitor pode consultar sinônimos ativos (utilizado também pela view vw_catalogServiceSearch)
+  DROP POLICY IF EXISTS p_leitor_search_synonym_select ON searchSynonym;
+  CREATE POLICY p_leitor_search_synonym_select
+    ON searchSynonym
+    FOR SELECT
+    TO sosp_leitor_role
+    USING (isActive = true);
+
   DROP POLICY IF EXISTS p_operador_search_synonym_select ON searchSynonym;
   CREATE POLICY p_operador_search_synonym_select
     ON searchSynonym
@@ -187,5 +209,19 @@ BEGIN;
     TO sosp_operador_role
     USING (true)
     WITH CHECK (cardinality(synonyms) > 0);
+
+  -- ---------------------------------------------------------------------------
+  -- 6. POLÍTICAS DE RLS: SLOTS DE AGENDAMENTO (schedulingSlot)
+  -- ---------------------------------------------------------------------------
+  -- Necessário para consulta de disponibilidade pública na view vw_schedulingSlotAvailability
+  -- sem expor dados nominais de agendamento do cidadão (que residem em schedulingAppointment).
+  -- ---------------------------------------------------------------------------
+
+  DROP POLICY IF EXISTS p_scheduling_slot_select ON schedulingSlot;
+  CREATE POLICY p_scheduling_slot_select
+    ON schedulingSlot
+    FOR SELECT
+    TO sosp_leitor_role, sosp_operador_role
+    USING (true);
 
 COMMIT;

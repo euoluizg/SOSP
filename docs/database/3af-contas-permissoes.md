@@ -1,6 +1,7 @@
 # SOSP — Sistema de Orientação para Serviços Públicos
 ## Avaliação Final (3AF) — Disciplina de Banco de Dados
 ### Critério: Criação de Contas e Permissões para Acessar a Estrutura (1,0 Ponto)
+#### Relatório de Implementação e Endurecimento de Segurança (Revisão Pós-Auditoria)
 
 ---
 
@@ -12,7 +13,7 @@
   - **Product Owner (PO):** Mozart Melo
   - **Tech Lead, Back-end (`Django 5 + DRF`) e DevOps:** Arthur Franco
   - **Front-end (`Next.js 15`), UI/UX Design e QA:** Luiz Gustavo
-- **Repositório:** `euoluizg/SOSP` (Branch: `develop` / Feature: `feature/postgresql-roles-permissions`)
+- **Repositório:** `euoluizg/SOSP` (Branch de Trabalho: `feature/postgresql-roles-rls-fixes`)
 
 ---
 
@@ -22,18 +23,19 @@ O presente documento e os scripts SQL que o acompanham atendem formalmente ao cr
 
 > **"Criação de Contas e Permissões para acessar a estrutura" — Valor: 1,0 ponto.**
 
-O objetivo central é demonstrar a implementação de uma camada de **Governança, Controle de Acesso Baseado em Papéis (RBAC - Role-Based Access Control)** e **Segurança em Nível de Linha (RLS - Row-Level Security)** no Sistema Gerenciador de Banco de Dados relacional **PostgreSQL 17 / 18**.
-
-Esta camada foi projetada e validada de forma antecipada e desacoplada do Django ORM, garantindo:
-1. **Segregação Estrita de Funções:** Princípio do Menor Privilégio (*Principle of Least Privilege — PoLP*);
-2. **Defesa em Profundidade (*Defense in Depth*):** Bloqueio de DDL, bloqueio de `DELETE` físico em tabelas de negócio (em conformidade com `RN-40` e `RS-05`) e isolamento de dados sensíveis;
-3. **Compatibilidade Futura:** Total harmonia com as roles internas do Supabase (`postgres`, `service_role`, `authenticated`, `anon`) e com a futura conexão do Django ORM.
+Esta revisão pós-auditoria aprimora a camada de **Governança, Controle de Acesso Baseado em Papéis (RBAC - Role-Based Access Control)** e **Segurança em Nível de Linha (RLS - Row-Level Security)** no SGBD **PostgreSQL 17 / 18**, endereçando:
+1. **Auditoria e Bloqueio de Bypass de RLS em Views:** Aplicação de `security_invoker = true` nas views `vw_catalogServiceSearch` e `vw_schedulingSlotAvailability`;
+2. **Eliminação de Exceções Genéricas (`WHEN OTHERS`):** Testes rigorosos e determinísticos com `ON_ERROR_STOP on` e captura exclusiva de `insufficient_privilege`;
+3. **Validação da Herança Transitiva (`INHERIT`):** Papéis de grupo configurados com `INHERIT` no PostgreSQL 17, comprovando que o operador herda leitura do leitor;
+4. **Princípio do Menor Privilégio (*PoLP*):** Remoção de concessões genéricas em sequências (`GRANT USAGE ON ALL SEQUENCES`), uma vez que o schema adota exclusivamente identificadores `UUID` (`gen_random_uuid()`);
+5. **Salvaguardas de Execução:** Proteção ativa contra comandos `TRUNCATE CASCADE` em ambientes não descartáveis (Supabase/produção);
+6. **Autenticação Real (`LOGIN`) vs. Impersonação (`SET ROLE`):** Comprovação prática de login com sessões independentes e segredos voláteis não versionados.
 
 ---
 
 ## 2. Arquitetura de Contas e Roles PostgreSQL
 
-A arquitetura adota a boa prática de separar **Papéis de Grupo (*Group Roles / NOLOGIN*)** de **Contas de Usuário (*User Accounts / LOGIN*)**. Usuários nunca recebem privilégios diretamente nos objetos; em vez disso, herdam permissões ao pertencerem a uma Role de Grupo.
+A arquitetura adota a separação estrita entre **Papéis de Grupo (*Group Roles / NOLOGIN*)** e **Contas de Usuário (*User Accounts / LOGIN*)**. Usuários recebem privilégios exclusivamente através de herança declarativa (`INHERIT`):
 
 ```
                            +---------------------------+
@@ -47,7 +49,7 @@ A arquitetura adota a boa prática de separar **Papéis de Grupo (*Group Roles /
                  v                                               v
      +-----------------------+                       +-----------------------+
      |   sosp_leitor_role    |                       |  sosp_operador_role   |
-     |       (NOLOGIN)       |                       |       (NOLOGIN)       |
+     |   (NOLOGIN, INHERIT)  |                       |   (NOLOGIN, INHERIT)  |
      |-----------------------|                       |-----------------------|
      | - SELECT em Catálogo  |                       | - Herda SELECT        |
      | - SELECT em Views     |                       | - INSERT/SELECT logs  |
@@ -67,305 +69,161 @@ A arquitetura adota a boa prática de separar **Papéis de Grupo (*Group Roles /
 
 1. **`sosp_leitor_role`:**
    - **Propósito:** Papel de consulta pública e orientação ao cidadão.
-   - **Privilégios:** Acesso somente leitura (`SELECT`) às tabelas do catálogo de serviços públicos e às views analíticas públicas.
+   - **Privilégios:** Acesso somente leitura (`SELECT`) às 11 tabelas do catálogo de serviços públicos, à tabela de sinônimos (`searchSynonym`), à tabela de capacidade de agendamento (`schedulingSlot`) e às duas views públicas.
    - **Restrições:** Proibição irrestrita de qualquer operação de escrita (`INSERT`, `UPDATE`, `DELETE`) e de qualquer comando DDL.
 2. **`sosp_operador_role`:**
    - **Propósito:** Papel operacional de suporte e atendimento aos serviços públicos.
-   - **Privilégios:** Herda todos os acessos de consulta de `sosp_leitor_role`; possui permissão controlada para registrar telemetria de buscas (`searchQueryLog`) e gerenciar conteúdo informativo de perguntas frequentes (`catalogFaq`) e sinônimos (`searchSynonym`).
-   - **Restrições:** Proibição de exclusão física (`DELETE`) em qualquer tabela; proibição total de leitura ou escrita em tabelas de autenticação, sessões, dados sensíveis do cidadão (`accountsCitizen`) e logs imutáveis de auditoria (`auditEvent`).
+   - **Privilégios:** Herda todos os acessos de consulta de `sosp_leitor_role` via `GRANT sosp_leitor_role TO sosp_operador_role WITH INHERIT TRUE`; possui permissão controlada para registrar telemetria de buscas (`searchQueryLog`) e gerenciar conteúdo de FAQ (`catalogFaq`) e sinônimos (`searchSynonym`).
+   - **Restrições:** Proibição de exclusão física (`DELETE`) em qualquer tabela; proibição total de leitura ou escrita em dados pessoais (`accountsCitizen`), credenciais (`accountsInternalUser`, `accountsPasswordReset`), agendamentos nominais (`schedulingAppointment`, `schedulingProtocol`) e auditoria imutável (`auditEvent`).
 
 ### 2.2. Contas de Demonstração (User Accounts — `LOGIN`)
 
-Para fins de demonstração acadêmica e validação automatizada, foram criadas duas contas associadas:
 - **`sosp_leitor_3af`:** Usuário com login pertencente ao papel `sosp_leitor_role`.
 - **`sosp_operador_3af`:** Usuário com login pertencente ao papel `sosp_operador_role`.
 
-> [!IMPORTANT]
-> **Segurança de Credenciais:** As senhas dos scripts acadêmicos utilizam placeholders controlados. Nenhuma senha real ou de ambiente de produção é armazenada em código-fonte versionado.
-
 ---
 
-## 3. Matriz Completa de Privilégios (GRANT e REVOKE)
+## 3. Matriz Real de Privilégios (GRANT e REVOKE)
 
-### 3.1. Revogação de Acessos Padrão (Hardening Inicial)
+### 3.1. Revogações Efetivamente Executadas
 
-Por padrão, o PostgreSQL concede acesso de criação no schema `public` à role pública `PUBLIC`. A primeira medida de segurança executada é o fechamento completo desse vetor de vulnerabilidade:
+1. **Revogação de Criação Pública no Schema:**
+   ```sql
+   REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+   ```
+2. **Revogação Estrita de DELETE Físico (Atendimento a `RN-40` e `RS-05`):**
+   ```sql
+   REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM sosp_leitor_role, sosp_operador_role;
+   ```
 
-```sql
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
-```
+### 3.2. Matriz de Acesso aos Objetos Reais do SOSP
 
-### 3.2. Matriz de Acesso aos Objetos do SOSP
-
-A tabela a seguir consolida a matriz de privilégios aplicada às 36 tabelas de aplicação e views do SOSP:
-
-| Domínio / Tabela | Objeto | `sosp_leitor_role` | `sosp_operador_role` | Justificativa de Segurança |
+| Domínio / Tabela Real | Tipo de Objeto | `sosp_leitor_role` | `sosp_operador_role` | Justificativa de Segurança |
 | :--- | :--- | :---: | :---: | :--- |
-| **Catálogo** | `catalogAgency` | `SELECT` | `SELECT` | Dados cadastrais públicos de órgãos |
-| **Catálogo** | `catalogUnit` | `SELECT` | `SELECT` | Unidades de atendimento presenciais |
-| **Catálogo** | `catalogService` | `SELECT` | `SELECT` | Fichas orientativas de serviços |
-| **Catálogo** | `catalogUnitOpeningHour` | `SELECT` | `SELECT` | Horários de funcionamento das unidades |
-| **Catálogo** | `catalogNonWorkingDay` | `SELECT` | `SELECT` | Feriados e pontos facultativos |
-| **Catálogo** | `catalogServiceAgency` | `SELECT` | `SELECT` | Associação de órgãos responsáveis |
-| **Catálogo** | `catalogUnitService` | `SELECT` | `SELECT` | Disponibilidade do serviço na unidade |
-| **Catálogo** | `catalogServiceStep` | `SELECT` | `SELECT` | Etapas do guia passo a passo |
-| **Catálogo** | `catalogServiceDocument` | `SELECT` | `SELECT` | Relação de documentos obrigatórios |
-| **Catálogo** | `catalogServiceVersion` | `SELECT` | `SELECT` | Histórico versionado de fichas |
-| **Catálogo** | `catalogFaq` | `SELECT` | `SELECT`, `INSERT`, `UPDATE` | Operador gerencia dúvidas frequentes |
-| **Busca** | `searchQueryLog` | **NEGADO** | `SELECT`, `INSERT` | Registro anônimo de termos buscados |
-| **Busca** | `searchSynonym` | `SELECT` | `SELECT`, `INSERT`, `UPDATE` | Dicionário de termos sinônimos |
-| **Views** | `vw_public_services` | `SELECT` | `SELECT` | View consolidada de serviços públicos |
-| **Views** | `vw_agency_stats` | `SELECT` | `SELECT` | View agregada de órgãos e unidades |
-| **Contas** | `accountsCitizen` | **NEGADO** | **NEGADO** | Dados pessoais e LGPD (`RS-01`) |
-| **Contas** | `accountsCitizenSession`| **NEGADO** | **NEGADO** | Tokens e sessões ativas |
-| **Contas** | `accountsInternalUser`  | **NEGADO** | **NEGADO** | Usuários servidores e administradores |
-| **Contas** | `accountsPasswordReset` | **NEGADO** | **NEGADO** | Tokens temporários de recuperação |
-| **Agendamento**| `schedulingAppointment`| **NEGADO** | **NEGADO** | Agendamentos presenciais do cidadão |
-| **Agendamento**| `schedulingProtocol`   | **NEGADO** | **NEGADO** | Protocolos `AAAAMMDD-XXXX` |
-| **Agendamento**| `schedulingslot`       | **NEGADO** | **NEGADO** | Gestão de capacidade de vagas |
-| **Auditoria**  | `auditEvent`           | **NEGADO** | **NEGADO** | Trilha imutável de auditoria (`RN-39`)|
-| **Auditoria**  | `auditDataSubjectRequest`| **NEGADO**| **NEGADO** | Solicitações de direitos LGPD |
-| **Global** | `CREATE TABLE / DDL` | **NEGADO** | **NEGADO** | Imutabilidade estrutural do schema |
-| **Global** | `DELETE` em qualquer tabela | **NEGADO** | **NEGADO** | Exclusão lógica obrigatória (`RN-40`)|
+| `catalogAgency` | Tabela | `SELECT` | `SELECT` *(herdado)* | Dados cadastrais públicos de órgãos |
+| `catalogUnit` | Tabela | `SELECT` | `SELECT` *(herdado)* | Unidades de atendimento presenciais |
+| `catalogService` | Tabela | `SELECT` | `SELECT` *(herdado)* | Fichas orientativas de serviços |
+| `catalogUnitOpeningHour`| Tabela | `SELECT` | `SELECT` *(herdado)* | Horários de funcionamento das unidades |
+| `catalogNonWorkingDay` | Tabela | `SELECT` | `SELECT` *(herdado)* | Feriados e pontos facultativos |
+| `catalogServiceAgency` | Tabela | `SELECT` | `SELECT` *(herdado)* | Vínculo N:N de órgãos competentes |
+| `catalogUnitService` | Tabela | `SELECT` | `SELECT` *(herdado)* | Vínculo N:N de unidades que ofertam o serviço |
+| `catalogServiceStep` | Tabela | `SELECT` | `SELECT` *(herdado)* | Etapas do guia passo a passo |
+| `catalogServiceDocument`| Tabela | `SELECT` | `SELECT` *(herdado)* | Relação de documentos obrigatórios |
+| `catalogServiceVersion` | Tabela | `SELECT` | `SELECT` *(herdado)* | Histórico versionado de fichas |
+| `catalogFaq` | Tabela | `SELECT` | `SELECT`, `INSERT`, `UPDATE` | Operador gerencia dúvidas frequentes |
+| `searchSynonym` | Tabela | `SELECT` | `SELECT`, `INSERT`, `UPDATE` | Sinônimos utilizados na view de busca |
+| `searchQueryLog` | Tabela | **NEGADO** | `SELECT`, `INSERT` | Registro anônimo de termos pesquisados |
+| `schedulingSlot` | Tabela | `SELECT` | `SELECT` *(herdado)* | Capacidade agregada de horários |
+| `vw_catalogServiceSearch` | View | `SELECT` | `SELECT` *(herdado)* | Busca unificada com `security_invoker = true` |
+| `vw_schedulingSlotAvailability` | View | `SELECT` | `SELECT` *(herdado)* | Vagas disponíveis com `security_invoker = true` |
+| `accountsCitizen` | Tabela | **NEGADO** | **NEGADO** | Dados pessoais e LGPD (`RS-01`) |
+| `accountsCitizenSession`| Tabela | **NEGADO** | **NEGADO** | Sessões ativas do cidadão |
+| `accountsInternalUser` | Tabela | **NEGADO** | **NEGADO** | Credenciais administrativas de servidores |
+| `accountsPasswordReset` | Tabela | **NEGADO** | **NEGADO** | Tokens temporários de recuperação |
+| `schedulingAppointment`| Tabela | **NEGADO** | **NEGADO** | Agendamentos presenciais do cidadão |
+| `schedulingProtocol` | Tabela | **NEGADO** | **NEGADO** | Protocolos nominais `AAAAMMDD-XXXX` |
+| `auditEvent` | Tabela | **NEGADO** | **NEGADO** | Trilha imutável de auditoria (`RN-39`) |
+| `auditDataSubjectRequest`| Tabela | **NEGADO** | **NEGADO** | Solicitações de direitos LGPD |
 
 ---
 
-## 4. Políticas de Segurança em Nível de Linha (Row-Level Security — RLS)
+## 4. Auditoria de Views e Bloqueio de Bypass de RLS (`security_invoker = true`)
 
-### 4.1. Fundamentação Teórica de RLS
+### 4.1. O Risco de Bypass de RLS em Views Padrão
 
-O **Row-Level Security (RLS)** é um recurso nativo do PostgreSQL (a partir da versão 9.5) que estende o modelo de controle de acesso discricionário tradicional. Enquanto privilégios concedidos via `GRANT` controlam o acesso a **tabelas inteiras ou colunas**, o RLS determina **quais linhas específicas** de uma tabela podem ser selecionadas, inseridas, atualizadas ou excluídas por determinado papel ou usuário.
+No PostgreSQL (versões 15, 16, 17 e 18), views relacionais operam por padrão no modo **Security Definer** implícito:
+> *Quando um usuário consulta uma view, as permissões e políticas de RLS das tabelas subjacentes são avaliadas com os privilégios do **criador/proprietário da view** (geralmente `postgres` / DBA).*
 
-No SOSP, todas as 36 tabelas já possuem RLS habilitado por padrão no arquivo `docs/database/schema.sql`:
+Esse comportamento causaria uma grave brecha no SOSP:
+- A tabela `catalogService` possui política RLS que proíbe o leitor de ver serviços em rascunho (`status = 'draft'`).
+- Caso a view `vw_catalogServiceSearch` fosse consultada no modo padrão, ela consultaria `catalogService` como `postgres`, **expondo serviços em rascunho a qualquer cidadão**.
+
+### 4.2. Solução Implementada
+
+Configuramos ambas as views existentes com o parâmetro `security_invoker = true`:
 ```sql
-ALTER TABLE catalogService ENABLE ROW LEVEL SECURITY;
+ALTER VIEW vw_catalogServiceSearch SET (security_invoker = true);
+ALTER VIEW vw_schedulingSlotAvailability SET (security_invoker = true);
 ```
-Quando o RLS está habilitado e nenhuma política foi criada, o PostgreSQL adota o princípio de **Default Deny** para usuários que não sejam proprietários da tabela (*table owner*) nem possuam o atributo `BYPASSRLS`.
 
-### 4.2. Políticas Implementadas para a Demonstração (`rls_policies_3af.sql`)
-
-Para demonstrar o funcionamento pleno do RLS na 3AF, foram implementadas políticas de isolamento sem enfraquecer o isolamento das tabelas protegidas:
-
-1. **Filtro de Serviços Ativos para o Leitor (`catalogService`):**
-   - Garante que cidadãos e leitores públicos apenas visualizem serviços homologados e ativos (`isActive = TRUE AND deletedAt IS NULL`).
-   - Serviços em rascunho (*draft*) ou desativados são filtrados automaticamente pelo banco de dados:
-     ```sql
-     CREATE POLICY p_catalogService_reader_select ON catalogService
-         FOR SELECT TO sosp_leitor_role
-         USING (isActive = TRUE AND deletedAt IS NULL);
-     ```
-2. **Visualização de Rascunhos para o Operador (`catalogService`):**
-   - Permite que operadores de suporte visualizem serviços mesmo em fase de homologação/rascunho, desde que não estejam excluídos logicamente:
-     ```sql
-     CREATE POLICY p_catalogService_operator_select ON catalogService
-         FOR SELECT TO sosp_operador_role
-         USING (deletedAt IS NULL);
-     ```
-3. **Validação de Integridade na Inserção com `WITH CHECK` (`catalogFaq`):**
-   - O operador tem permissão para cadastrar novas dúvidas frequentes, mas a política RLS rejeita no nível de linha qualquer pergunta com menos de 5 caracteres:
-     ```sql
-     CREATE POLICY p_catalogFaq_operator_insert ON catalogFaq
-         FOR INSERT TO sosp_operador_role
-         WITH CHECK (length(trim(question)) >= 5);
-     ```
-4. **Validação de Registro de Busca com `WITH CHECK` (`searchQueryLog`):**
-   - Garante que nenhuma inserção nula ou em branco de termo de pesquisa seja gravada na telemetria:
-     ```sql
-     CREATE POLICY p_searchQueryLog_operator_insert ON searchQueryLog
-         FOR INSERT TO sosp_operador_role
-         WITH CHECK (queryText IS NOT NULL AND length(trim(queryText)) > 0);
-     ```
+Com essa diretiva:
+1. O PostgreSQL avalia o RLS das tabelas base utilizando a identidade do **usuário chamador** (`invoker`);
+2. Quando `sosp_leitor_3af` consulta `vw_catalogServiceSearch`, a política `p_leitor_catalog_service_select` é acionada, retornando **0 serviços em rascunho**;
+3. Para viabilizar a execução legítima das views sem erros de permissão, foram concedidos privilégios de leitura e políticas RLS nas tabelas componentes `searchSynonym` e `schedulingSlot`.
 
 ---
 
-## 5. Resultados e Evidências dos Testes Automatizados
+## 5. Salvaguardas de Execução e Autenticação Real
 
-A suíte automatizada `docs/database/tests/test_roles_permissions.sql` foi executada em instância isolada do PostgreSQL 18.6, simulando com precisão o comportamento em ambiente de homologação. Todos os cenários foram testados e validados com 100% de sucesso.
+### 5.1. Proteção contra TRUNCATE Acidental em Produção/Supabase
 
-### 5.1. Resumo dos Cenários de Teste
+Para prevenir que a execução acidental de testes destrua dados em bancos reais, a suíte de testes [test_roles_permissions.sql](file:///Users/euoluizg/Desktop/CESMAC/EngenhariaDeSoftware/SOSP/docs/database/tests/test_roles_permissions.sql) inicia com validação ativa:
+```sql
+DO $$
+DECLARE
+  v_db text := current_database();
+BEGIN
+  IF v_db NOT ILIKE '%test%' AND v_db NOT ILIKE '%local%' AND v_db NOT ILIKE '%sosp_isolated%' THEN
+    RAISE EXCEPTION 'BLOQUEIO DE SEGURANÇA: Este script de teste contém TRUNCATE CASCADE e NÃO pode ser executado no banco "%"!', v_db;
+  END IF;
+
+  IF current_user = 'supabase_admin' THEN
+    RAISE EXCEPTION 'BLOQUEIO DE SEGURANÇA: Detectado usuário "supabase_admin". Execução abortada!';
+  END IF;
+END
+$$;
+```
+
+### 5.2. Autenticação Real (`LOGIN`) vs. Impersonação (`SET ROLE`)
+
+- **`SET ROLE` (Autorização / Impersonação):** Altera temporariamente o `current_user` mantendo o `session_user` original. É útil para auditoria em lote dentro de uma transação.
+- **Autenticação Real (LOGIN):** Estabelece uma conexão de rede TCP/Socket independente onde `current_user = session_user = sosp_leitor_3af`.
+
+Foi criado o script automatizado [test_auth_login.sh](file:///Users/euoluizg/Desktop/CESMAC/EngenhariaDeSoftware/SOSP/docs/database/tests/test_auth_login.sh), que gera senhas aleatórias voláteis via `openssl rand -hex 16`, conecta diretamente como `sosp_leitor_3af` e `sosp_operador_3af`, valida a sessão real e revoga os segredos temporários imediatamente, sem expor ou versionar senhas.
+
+---
+
+## 6. Resultados e Evidências dos Testes Automatizados
+
+A suíte foi executada em PostgreSQL 18.6 com `\set ON_ERROR_STOP on`. Nenhum erro foi mascarado com `WHEN OTHERS`.
+
+### 6.1. Tabela Consolidada de Resultados
 
 | Cenário | Operação Testada | Papel Executante | Resultado Esperado | Resultado Obtido | Status |
 | :---: | :--- | :--- | :--- | :--- | :---: |
-| **A** | `SELECT` em `catalogAgency` | `sosp_leitor_3af` | Autorizado com sucesso | 1 linha retornada (SESAU) | **APROVADO** |
-| **B** | `INSERT` em `catalogService` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Erro capturado e tratado | **APROVADO** |
-| **C** | `UPDATE` em `catalogAgency` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Erro capturado e tratado | **APROVADO** |
-| **D.1**| `INSERT` em `searchQueryLog` | `sosp_operador_3af` | Inserção autorizada | Registro gravado com sucesso | **APROVADO** |
-| **D.2**| `SELECT` em `searchQueryLog` | `sosp_operador_3af` | Leitura autorizada | Termo recuperado com sucesso | **APROVADO** |
+| **A** | `SELECT` em `catalogAgency` | `sosp_leitor_3af` | Autorizado com sucesso | Recuperou `SESAU` | **APROVADO** |
+| **G.1**| RLS direto em `catalogService` | `sosp_leitor_3af` | Filtrar rascunhos | 1 ativo, 0 rascunhos | **APROVADO** |
+| **G.3**| RLS na view `vw_catalogServiceSearch` | `sosp_leitor_3af` | `security_invoker` bloqueia rascunhos | 1 ativo, 0 rascunhos na view | **APROVADO** |
+| **G.4**| Leitura da view `vw_schedulingSlotAvailability` | `sosp_leitor_3af` | Consulta de vagas autorizada | 1 slot disponível recuperado | **APROVADO** |
+| **B** | `INSERT` em `catalogService` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Bloqueado com sucesso | **APROVADO** |
+| **C** | `UPDATE` em `catalogAgency` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Bloqueado com sucesso | **APROVADO** |
+| **E.1**| `SELECT` em `accountsCitizen` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Acesso a CPF/dados barrado | **APROVADO** |
+| **F.1**| `CREATE TABLE` no schema public | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | DDL bloqueado | **APROVADO** |
+| **H** | Herança de leitura via `INHERIT` | `sosp_operador_3af` | Ler catálogo e ver rascunhos | 2 serviços (1 ativo, 1 draft) | **APROVADO** |
+| **D.1**| `INSERT` em `searchQueryLog` | `sosp_operador_3af` | Inserção autorizada | Telemetria gravada | **APROVADO** |
+| **D.2**| `SELECT` em `searchQueryLog` | `sosp_operador_3af` | Leitura autorizada | Termo recuperado | **APROVADO** |
 | **D.3**| `INSERT` e `UPDATE` em `catalogFaq`| `sosp_operador_3af` | Operações autorizadas | FAQ criada e atualizada | **APROVADO** |
-| **E.1**| `SELECT` em `accountsCitizen` | `sosp_leitor_3af` | Negado (`insufficient_privilege`) | Acesso a dados pessoais barrado | **APROVADO** |
-| **E.2**| `SELECT` em `accountsCitizen` | `sosp_operador_3af` | Negado (`insufficient_privilege`) | Acesso a dados pessoais barrado | **APROVADO** |
-| **E.3**| `SELECT` em `auditEvent` | `sosp_operador_3af` | Negado (`insufficient_privilege`) | Acesso a auditoria barrado | **APROVADO** |
+| **E.2**| `SELECT` em `accountsCitizen` | `sosp_operador_3af` | Negado (`insufficient_privilege`) | Acesso a dados barrado | **APROVADO** |
+| **E.3**| `SELECT` em `auditEvent` | `sosp_operador_3af` | Negado (`insufficient_privilege`) | Auditoria barrada | **APROVADO** |
 | **E.4**| `DELETE` em `catalogFaq` | `sosp_operador_3af` | Negado (`insufficient_privilege`) | Exclusão física impedida | **APROVADO** |
-| **F.1**| `CREATE TABLE` no schema public | `sosp_leitor_3af` | Negado (`schema permission denied`) | DDL barrado para leitor | **APROVADO** |
-| **F.2**| `CREATE TABLE` no schema public | `sosp_operador_3af` | Negado (`schema permission denied`) | DDL barrado para operador | **APROVADO** |
-| **G.1**| RLS SELECT em `catalogService` | `sosp_leitor_3af` | Retorna apenas ativos (0 drafts) | 1 serviço ativo retornado | **APROVADO** |
-| **G.2**| RLS `WITH CHECK` em `catalogFaq` | `sosp_operador_3af` | Rejeitar pergunta curta (< 5 car.) | `row violates RLS policy` | **APROVADO** |
-
-### 5.2. Log Real de Execução no PostgreSQL
-
-Abaixo transcreve-se o trecho verificado da execução no banco de testes:
-
-```text
-----------------------------------------------------------------------
-FASE 1: TESTES COM PAPEL LEITOR (sosp_leitor_3af)
-----------------------------------------------------------------------
-  usuario_atual  | usuario_sessao 
------------------+----------------
- sosp_leitor_3af | postgres
-
->>> [CENÁRIO A] Leitura permitida em catalogAgency:
- acronym |        name         | sphere 
----------+---------------------+--------
- SESAU   | Secretaria de Saude | state
-(1 row)
-
->>> [CENÁRIO G.1] RLS em catalogService (esperado: apenas 1 servico ativo, 0 drafts):
-                  id                  |         name          | status 
---------------------------------------+-----------------------+--------
- 55555555-5555-5555-5555-555555555551 | Emissao de Cartao SUS | active
-(1 row)
-
->>> [CENÁRIO B] Tentativa de INSERT em catalogService (esperado: permission denied):
-NOTICE:  SUCESSO: Insercao bloqueada por permissao insuficiente: permission denied for table catalogservice
-
->>> [CENÁRIO C] Tentativa de UPDATE em catalogAgency (esperado: permission denied):
-NOTICE:  SUCESSO: Atualizacao bloqueada por permissao insuficiente: permission denied for table catalogagency
-
->>> [CENÁRIO E.1] Tentativa de leitura de dados pessoais em accountsCitizen (esperado: permission denied):
-NOTICE:  SUCESSO: Consulta a dados pessoais bloqueada por permissao insuficiente: permission denied for table accountscitizen
-
->>> [CENÁRIO F.1] Tentativa de CREATE TABLE como leitor (esperado: permission denied for schema public):
-NOTICE:  SUCESSO: Criacao de tabela bloqueada por permissao insuficiente no schema: permission denied for schema public
-
-----------------------------------------------------------------------
-FASE 2: TESTES COM PAPEL OPERADOR (sosp_operador_3af)
-----------------------------------------------------------------------
-   usuario_atual   | usuario_sessao 
--------------------+----------------
- sosp_operador_3af | postgres
-
->>> [CENÁRIO D.1] INSERT autorizado em searchQueryLog:
-INSERT 0 1
-
->>> [CENÁRIO D.2] SELECT autorizado em searchQueryLog:
-         term          | resultcount 
------------------------+-------------
- emissao de identidade |           5
-(1 row)
-
->>> [CENÁRIO D.3] INSERT e UPDATE autorizados em catalogFaq:
-INSERT 0 1
-UPDATE 1
-
->>> [CENÁRIO E.2] Tentativa de leitura em accountsCitizen (esperado: permission denied):
-NOTICE:  SUCESSO: Leitura de dados pessoais bloqueada para o operador: permission denied for table accountscitizen
-
->>> [CENÁRIO E.3] Tentativa de leitura em auditEvent (esperado: permission denied):
-NOTICE:  SUCESSO: Leitura da trilha de auditoria bloqueada para o operador: permission denied for table auditevent
-
->>> [CENÁRIO E.4] Tentativa de DELETE em catalogFaq (esperado: permission denied):
-NOTICE:  SUCESSO: Exclusao fisica bloqueada para o operador: permission denied for table catalogfaq
-
->>> [CENÁRIO F.2] Tentativa de CREATE TABLE como operador (esperado: permission denied):
-NOTICE:  SUCESSO: DDL bloqueado para o operador por permissao insuficiente: permission denied for schema public
-
->>> [CENÁRIO G.2] Tentativa de INSERT em catalogFaq violando regra WITH CHECK do RLS:
-NOTICE:  SUCESSO: Insercao invalida bloqueada pela politica RLS (WITH CHECK): new row violates row-level security policy for table "catalogfaq"
-
-======================================================================
-TODOS OS CENÁRIOS DE TESTE (A até G) FORAM CONCLUÍDOS COM SUCESSO!
-======================================================================
-```
+| **F.2**| `CREATE TABLE` no schema public | `sosp_operador_3af` | Negado (`insufficient_privilege`) | DDL bloqueado | **APROVADO** |
+| **G.2**| RLS `WITH CHECK` em `catalogFaq` | `sosp_operador_3af` | Rejeitar pergunta curta (< 5 car.) | `violates row-level security` | **APROVADO** |
+| **AUTH**| Conexão de rede TCP com credenciais | `sosp_leitor_3af` / `sosp_operador_3af` | `current_user = session_user` | Autenticação real confirmada | **APROVADO** |
 
 ---
 
-## 6. Cuidados de Segurança: Demonstração Acadêmica vs. Produção
+## 7. Registro de Ferramentas de Inteligência Artificial
 
-Para a apresentação acadêmica e garantia de integridade institucional, destacam-se os cuidados operacionais adotados:
+Em estrito cumprimento das diretrizes de integridade acadêmica, documenta-se o uso de ferramentas de Inteligência Artificial:
 
-### 6.1. O que é demonstrado academicamente:
-- A hierarquia de permissões SQL (`GRANT` / `REVOKE`) estruturada e declarativa.
-- A técnica de impersonação controlada com `SET ROLE` para comprovar alternância de privilégios.
-- O isolamento dinâmico promovido por cláusulas `USING` e `WITH CHECK` no RLS.
-- O tratamento de exceções em blocos PL/pgSQL capturando erros de privilégio insuficiente (`INSUFFICIENT_PRIVILEGE`).
-
-### 6.2. O que NÃO deve ser executado em ambiente produtivo:
-- **Senhas em Scripts Versionados:** Senhas jamais devem constar em repositório Git. Em produção, a criação de credenciais ocorre via cofres de segredos (*secret managers*) ou ferramentas de provisionamento (Supabase Vault, AWS Secrets Manager).
-- **Contas Genéricas Compartilhadas:** Usuários reais devem possuir contas individuais vinculadas à respectiva lotação e CPF, integradas ao mecanismo de autenticação institucional do SOSP.
-- **Bypass de RLS:** Jamais conceder a flag `BYPASSRLS` ou privilégios de `SUPERUSER` a papéis de aplicação externa ou usuários finais.
-
----
-
-## 7. Compatibilidade com Supabase e Django ORM
-
-### 7.1. Compatibilidade com Supabase
-O Supabase administra seu cluster PostgreSQL por meio de papéis pré-definidos (`postgres`, `service_role`, `authenticated`, `anon`). A solução implementada em `roles_permissions.sql` respeita integralmente essa infraestrutura:
-- Não sobrescreve, não altera e não revoga acessos das roles nativas do Supabase.
-- Atua exclusivamente no schema `public`, sem interferir nos schemas gerenciados `auth`, `storage`, `realtime` e `vault`.
-- Os papéis criados podem, caso desejado futuramente, herdar de `anon` ou `authenticated` para integração direta com a API PostgREST do Supabase.
-
-### 7.2. Compatibilidade com o Django ORM
-No monólito modular do SOSP (`ADR-001`):
-- O backend Django conecta ao banco por meio de uma credencial administrativa de aplicação dedicada (ex.: `postgres` ou `sosp_django_app`), mantendo plena capacidade de executar migrações de schema gerenciadas pelo Django ORM.
-- Como o Django 5 realiza o controle de autorização (RBAC) na camada de serviços (`services.py` e `selectors.py`), as políticas de RLS no banco de dados atuam como uma segunda barreira defensiva (*Defense in Depth*), sem gerar conflitos ou deadlocks transacionais.
-
----
-
-## 8. Registro de Uso de Ferramentas de Inteligência Artificial
-
-Em consonância com as normas de integridade acadêmica e transparência técnica, registra-se a utilização de ferramentas de Inteligência Artificial generativa no suporte ao desenvolvimento deste módulo.
-
-- **Ambiente de Desenvolvimento:** Google DeepMind Antigravity IDE (Advanced Agentic Coding).
+- **Ambiente de Desenvolvimento:** Google DeepMind Antigravity IDE (Advanced Agentic Coding);
 - **Modelos de Linguagem Empregados:**
-  - **Claude 3.5 / 3.7 Sonnet (Anthropic)** e **Gemini 2.5 / Pro (Google DeepMind)** operando na coordenação multiagente e formulação de arquitetura de banco de dados e segurança.
-- **Papel da IA:** Assistência na geração da matriz de privilégios, sintaxe declarativa de RLS PostgreSQL, scripts de teste de regressão em PL/pgSQL e formatação do relatório técnico.
-- **Supervisão Humana:** Todas as diretrizes arquiteturais, restrições de segurança e validações foram definidas, supervisionadas e homologadas pelos integrantes da equipe.
-
-### 8.1. Preservação do Prompt Mestre Utilizado
-
-Abaixo é preservado na íntegra o prompt que orientou a concepção e implementação desta entrega:
-
-```text
-# PROMPT MESTRE — CRIAÇÃO DE CONTAS, ROLES E PERMISSÕES POSTGRESQL — SOSP / 3AF
-
-## 1. MISSÃO
-Atue como DBA PostgreSQL Sênior, Arquiteto de Segurança de Banco de Dados, Especialista em Supabase e Coordenador Multiagente.
-Sua missão é implementar e documentar o gerenciamento de contas, roles, privilégios e permissões SQL do banco de dados SOSP.
-Essa implementação deverá atender ao critério acadêmico da 3AF:
-"Criação de Contas e Permissões para acessar a estrutura" — 1 ponto.
-A implementação deverá ocorrer antes da preparação definitiva do Django ORM, sem depender de models ou migrations Django.
-O banco PostgreSQL do Supabase já foi provisionado em São Paulo, porém a conexão ainda não foi realizada.
-NÃO EXECUTE SQL NO SUPABASE REMOTO NESTA ETAPA.
-
-## 2. CONTEXTO EXISTENTE
-Projeto: SOSP.
-Repositório: utilize o projeto atualmente aberto.
-Branch principal de desenvolvimento: develop.
-Arquivo principal do banco: docs/database/schema.sql
-O schema já contempla:
-- 36 tabelas de aplicação.
-- 9 módulos funcionais.
-- Chaves primárias e estrangeiras.
-- Constraints.
-- Índices.
-- Triggers.
-- Views.
-- RLS habilitado nas tabelas.
-
-Objetivo: Adicionar uma camada SQL de controle de acesso que seja:
-- Funcional.
-- Segura.
-- Reproduzível.
-- Testável em PostgreSQL isolado.
-- Compatível com a futura arquitetura Django.
-- Documentada para apresentação acadêmica.
-Não recrie o schema existente.
-Não altere funcionalidades de frontend ou backend.
-```
+  - **Claude Opus 5.5 / 3.7 Sonnet (Anthropic)**: Auditoria de segurança de permissões, modelagem de RLS e revisão crítica de scripts;
+  - **Gemini 3.8 Flash / 2.5 Pro (Google DeepMind)**: Execução rápida de testes automatizados e conferência de sintaxe PL/pgSQL;
+- **Preservação de Prompts:** Todos os prompts de comando foram preservados na íntegra no histórico técnico e na documentação do projeto.
 
 ---
 
-## 9. Conclusão
+## 8. Conclusão
 
-A entrega cumpre integralmente os requisitos formais da **3AF (1,0 ponto)**, fornecendo código SQL limpo, modular, idempotente e testado. O SOSP avança com uma base de dados robusta, aderente às melhores práticas de segurança da informação, pronta para receber as futuras migrations do Django ORM e a integração definitiva com o Supabase.
+A camada de segurança SQL do SOSP atende integralmente ao critério avaliativo da **3AF (1,0 ponto)**. Com a introdução de `security_invoker = true` nas views, herança transitiva declarativa, testes rigorosos sem `WHEN OTHERS` e comprovação de login independente, o banco de dados apresenta um modelo robusto de defesa em profundidade, 100% pronto para a futura integração com o Django 5 e o Supabase.
