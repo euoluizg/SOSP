@@ -130,10 +130,14 @@ Por padrão, novas instâncias do Supabase expõem todas as tabelas criadas no s
 
 Os scripts de pré-voo foram desenhados para execução estritamente somente-leitura e não-destrutiva.
 
-### 6.1 Tratamento Seguro de Senhas (Sem Flags Inseguras na CLI)
+### 6.1 Tratamento Seguro de Senhas e SSL (Sem Flags Inseguras na CLI)
 > [!IMPORTANT]
-> **Nunca execute comandos passando `--password "$DB_PASSWORD"` diretamente na linha de comando.** Isso expõe senhas no histórico do shell (`.zsh_history`, `history`) e na listagem de processos do sistema operacional (`ps`).
-> Configure a senha na sessão do shell com `export DB_PASSWORD=...` (ou `export PGPASSWORD=...`) ou execute os scripts sem o parâmetro para que o terminal solicite a senha interativamente de forma oculta via `getpass`.
+> **1. Remoção Total da Opção `--password` na CLI:**  
+> A opção CLI `--password` foi totalmente removida dos scripts. Fornecer senhas diretamente na linha de comando expõe credenciais no histórico do shell (`.zsh_history`, `history`) e na listagem de processos do sistema (`ps`).  
+> Configure a senha na sessão do shell com `export DB_PASSWORD=...` (ou `export PGPASSWORD=...`) ou execute os scripts sem parâmetro para que o terminal solicite a senha interativamente de forma oculta via `getpass.getpass()`.
+>
+> **2. Rigor de SSL em Conexões Remotas:**  
+> Para qualquer host remoto (`aws-1-sa-east-1.pooler.supabase.com`), os scripts exigem obrigatoriamente `sslmode=require`, `verify-ca` ou `verify-full`. Conexões remotas com `disable`, `allow` ou `prefer` são **rejeitadas imediatamente por governança** com erro de segurança. O modo `disable`/`prefer` é aceito exclusivamente para hosts locais (`localhost`, `127.0.0.1`, socket Unix).
 
 ### 6.2 Execução do Teste de Conectividade (`preflight_connectivity.py`)
 ```bash
@@ -145,13 +149,13 @@ export DB_USER="postgres.<project-ref>"
 export DB_SSLMODE="require"
 export DB_PASSWORD="sua_senha_secreta"
 
-# 2. Executar o script de conectividade (lê do ambiente ou getpass)
+# 2. Executar o script de conectividade (lê do ambiente ou getpass interativo)
 python backend/scripts/preflight_connectivity.py
 ```
 
 **Códigos de Retorno:**
 - `0`: Conectividade TCP/Socket, resolução DNS e handshake PostgreSQL/SSL aprovados.
-- `1`: Falha de rede, timeout, DNS ou autenticação (senhas mascaradas nos logs).
+- `1`: Falha de rede, timeout, DNS, autenticação ou modo SSL inseguro em host remoto.
 
 ### 6.3 Execução da Inspeção de Schema (`preflight_schema_inspection.py`)
 Executa forçando `default_transaction_read_only=on`.
@@ -161,22 +165,27 @@ python backend/scripts/preflight_schema_inspection.py
 ```
 
 **Matriz Diagnóstica de Saída:**
-- `🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE)` (Exit code `0`):
+- `🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE) [AVALIAÇÃO PRELIMINAR]` (Exit code `0`):
   - Schema `public` limpo de tabelas, views e migrações.
   - Permissão `CREATE` confirmada.
   - Extensões `pg_trgm` e `unaccent` disponíveis.
-  - **Ação:** Autorizado para planejar aplicação da baseline.
+  - > [!WARNING]
+    > **Natureza Estritamente Preliminar:**  
+    > O status `READY_FOR_BASELINE` representa unicamente uma **avaliação preliminar de não-conflito** no schema `public`. Ele **NÃO constitui autorização automática** para executar migrations.  
+    > Contagens de objetos e ausência de tabelas não comprovam sozinhas a integridade semântica completa do banco (ex.: integridade de tipos, restrições e catálogo do sistema).  
+    > A aplicação de qualquer migration requer **aprovação humana formal e explícita** do Tech Lead e CODEOWNER (`@euoluizg`).
 - `🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)` (Exit code `0`):
   - Todas as 36 tabelas SOSP e 2 views presentes.
   - Todas as 11 migrações Django registradas em `django_migrations`.
   - Zero tabelas desconhecidas.
-  - **Ação:** Base íntegra e sincronizada.
+  - > [!NOTE]
+    > Contagens quantitativas de tabelas (36 SOSP + 2 Django) e registros de migrations atestam a presença dos objetos físicos, devendo a integridade funcional ser complementada e comprovada pela suíte de testes de integração da aplicação.
 - `🟡 STATUS: ESTADO PARCIAL DETECTADO (PARTIAL_STATE)` (Exit code `2`):
-  - Tabelas ou migrações incompletas.
-  - **Ação:** Migração bloqueada. Requer investigação de integridade.
+  - Tabelas ou migrações incompletas no banco.
+  - **Ação:** Migração bloqueada. Requer investigação detalhada de integridade.
 - `⚠️ STATUS: REVISÃO MANUAL OBRIGATÓRIA (MANUAL_REVIEW_REQUIRED)` (Exit code `2`):
-  - Detectadas tabelas desconhecidas no schema `public`, views órfãs ou falta de permissões DDL.
-  - **Ação:** Migração bloqueada. Exige auditoria humana.
+  - Detectadas tabelas desconhecidas no schema `public`, views órfãs ou ausência de permissão `CREATE`.
+  - **Ação:** Migração terminantemente bloqueada. Exige auditoria humana prévia.
 
 ---
 

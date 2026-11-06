@@ -10,10 +10,14 @@ Garantias de Segurança:
 - Conexão configurada com 'default_transaction_read_only=on' (rejeita qualquer escrita a nível de motor).
 - Não executa comandos DDL, INSERT, UPDATE, DELETE ou migrações.
 - Não expõe senhas ou tokens sensíveis em logs ou tracebacks.
+- Exige sslmode='require', 'verify-ca' ou 'verify-full' para hosts remotos (sem fallback para prefer/disable).
+- Preserva compatibilidade com bancos locais (sslmode prefer/disable aceitos em localhost/socket).
+- Lê senha exclusivamente de variáveis de ambiente (DB_PASSWORD / PGPASSWORD) ou getpass (opção CLI --password removida).
 - Avaliação estrita: não confunde 'nenhuma tabela SOSP' com 'banco limpo'.
+- Esclarece que READY_FOR_BASELINE é uma avaliação preliminar, não uma autorização automática para migrations.
 - Retorna código:
   * 0: READY_FOR_BASELINE ou ALREADY_PROVISIONED
-  * 1: Erro de conexão, autenticação ou biblioteca
+  * 1: Erro de conexão, autenticação, SSL ou biblioteca
   * 2: PARTIAL_STATE ou MANUAL_REVIEW_REQUIRED (requer intervenção)
 """
 
@@ -22,6 +26,9 @@ import sys
 import argparse
 import getpass
 from typing import Dict, Any, List, Set, Tuple
+
+VALID_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+RESTRICTIVE_REMOTE_SSLMODES = ("require", "verify-ca", "verify-full")
 
 SOSP_EXPECTED_TABLES: Set[str] = {
     "accountsgender",
@@ -96,10 +103,35 @@ def mask_string(val: str, show_chars: int = 4) -> str:
     return f"{val[:show_chars]}...{val[-show_chars:]}"
 
 
-def resolve_password(cli_password: str = "", host: str = "localhost") -> str:
-    """Resolve a senha de forma segura: CLI -> DB_PASSWORD -> PGPASSWORD -> getpass."""
-    if cli_password:
-        return cli_password
+def validate_sslmode(sslmode: str, host: str) -> str:
+    """
+    Valida e normaliza o sslmode garantindo segurança de transporte.
+    Para hosts remotos, exige 'require', 'verify-ca' ou 'verify-full'.
+    Proíbe 'disable', 'allow' ou 'prefer' em conexões remotas.
+    Preserva compatibilidade com bancos locais (localhost, socket Unix).
+    """
+    normalized = sslmode.strip().lower()
+    if normalized not in VALID_SSLMODES:
+        raise ValueError(
+            f"sslmode inválido: '{sslmode}'. Valores válidos: {', '.join(VALID_SSLMODES)}."
+        )
+
+    is_remote = host not in ("localhost", "127.0.0.1", "") and not host.startswith("/")
+    if is_remote and normalized not in RESTRICTIVE_REMOTE_SSLMODES:
+        raise ValueError(
+            f"Conexão remota rejeitada por governança de segurança: sslmode='{sslmode}' é proibido para o host remoto '{mask_string(host)}'. "
+            f"Para conexões remotas (como Supabase), sslmode deve ser 'require', 'verify-ca' ou 'verify-full'. "
+            "Fallback para SSL desabilitado ou prefer é terminantemente proibido."
+        )
+    return normalized
+
+
+def resolve_password(host: str = "localhost") -> str:
+    """
+    Resolve a senha de forma segura exclusivamente via variáveis de ambiente
+    (DB_PASSWORD / PGPASSWORD) ou entrada interativa oculta via getpass.
+    A passagem de senhas via linha de comando (CLI) foi removida por segurança.
+    """
     env_pwd = os.environ.get("DB_PASSWORD") or os.environ.get("PGPASSWORD")
     if env_pwd:
         return env_pwd
@@ -130,7 +162,7 @@ def evaluate_schema_state(
     """
     Avalia o estado estrutural do banco e retorna (status, mensagem, exit_code, motivos).
     Status possíveis:
-      - READY_FOR_BASELINE (0)
+      - READY_FOR_BASELINE (0) [Avaliação Preliminar]
       - ALREADY_PROVISIONED (0)
       - PARTIAL_STATE (2)
       - MANUAL_REVIEW_REQUIRED (2)
@@ -169,7 +201,7 @@ def evaluate_schema_state(
     if unknown_views:
         issues.append(f"Detectadas {len(unknown_views)} views desconhecidas no schema 'public': {sorted(list(unknown_views))[:10]}")
 
-    # Cenário 1: Banco Limpo (READY_FOR_BASELINE)
+    # Cenário 1: Banco Limpo (READY_FOR_BASELINE) - Avaliação Preliminar
     # Exige: 0 tabelas SOSP, 0 tabelas Django, 0 tabelas desconhecidas, 0 views SOSP, 0 migrations registradas
     if len(existing_tables_set) == 0 and len(existing_views_set) == 0 and len(applied_migrations) == 0:
         if issues:
@@ -181,7 +213,11 @@ def evaluate_schema_state(
             )
         return (
             "READY_FOR_BASELINE",
-            "Banco de dados limpo e sem conflitos. Schema 'public' pronto para receber a baseline consolidada.",
+            (
+                "Avaliação preliminar: Banco de dados limpo e sem conflitos aparentes no schema 'public'. "
+                "ATENÇÃO: Este status é uma avaliação preliminar de não-conflito, NÃO constituindo autorização "
+                "automática para execução de migrations sem aprovação do Tech Lead."
+            ),
             0,
             [],
         )
@@ -204,7 +240,11 @@ def evaluate_schema_state(
             )
         return (
             "ALREADY_PROVISIONED",
-            "Todas as 36 tabelas de aplicação, 2 views e 11 migrações da baseline estão presentes e íntegras.",
+            (
+                "Todas as 36 tabelas de aplicação, 2 views e 11 migrações da baseline estão registradas. "
+                "Nota: contagens de objetos atestam presença física, devendo a integridade semântica "
+                "ser garantida pela suíte de testes de integração."
+            ),
             0,
             [],
         )
@@ -394,7 +434,10 @@ def inspect_database(conn_info: Dict[str, Any]) -> int:
                 )
 
                 if status == "READY_FOR_BASELINE":
-                    print("🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE)")
+                    print("🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE) [AVALIAÇÃO PRELIMINAR]")
+                    print("   [!] GOVERNANÇA: Este status é uma avaliação preliminar de não-conflito.")
+                    print("       NÃO constitui autorização automática para executar migrations.")
+                    print("       Contagens de objetos não comprovam sozinhas a integridade semântica completa.")
                 elif status == "ALREADY_PROVISIONED":
                     print("🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)")
                 elif status == "PARTIAL_STATE":
@@ -430,12 +473,24 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.environ.get("DB_PORT", "5432")), help="Porta do banco")
     parser.add_argument("--dbname", default=os.environ.get("DB_NAME", "postgres"), help="Nome da base")
     parser.add_argument("--user", default=os.environ.get("DB_USER", "postgres"), help="Usuário")
-    parser.add_argument("--password", default="", help="(Opcional) Senha. Se omitido, lê de DB_PASSWORD/PGPASSWORD ou solicita via getpass.")
-    parser.add_argument("--sslmode", default=os.environ.get("DB_SSLMODE", "prefer"), help="Modo SSL")
+    parser.add_argument(
+        "--sslmode",
+        default="",
+        help="Modo SSL ('require', 'verify-ca', 'verify-full' para remoto; padrão 'require' em remoto, 'prefer' em local)",
+    )
 
     args = parser.parse_args()
 
-    password = resolve_password(args.password, args.host)
+    # Validação e aplicação de regras de SSL para hosts remotos
+    is_remote = args.host not in ("localhost", "127.0.0.1", "") and not args.host.startswith("/")
+    raw_sslmode = args.sslmode or os.environ.get("DB_SSLMODE") or ("require" if is_remote else "prefer")
+    try:
+        sslmode = validate_sslmode(raw_sslmode, args.host)
+    except ValueError as e:
+        print(f"\n❌ ERRO DE GOVERNANÇA DE SEGURANÇA SSL:\n   {e}\n")
+        sys.exit(1)
+
+    password = resolve_password(args.host)
 
     conn_info = {
         "host": args.host,
@@ -443,7 +498,7 @@ def main():
         "dbname": args.dbname,
         "user": args.user,
         "password": password,
-        "sslmode": args.sslmode,
+        "sslmode": sslmode,
         "connect_timeout": 8,
     }
 
@@ -454,7 +509,7 @@ def main():
     print(f"Porta:    {args.port}")
     print(f"Base:     {args.dbname}")
     print(f"Usuário:  {mask_string(args.user)}")
-    print(f"SSL Mode: {args.sslmode}")
+    print(f"SSL Mode: {sslmode}")
     print("-" * 70)
 
     exit_code = inspect_database(conn_info)

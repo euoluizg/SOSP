@@ -1,22 +1,33 @@
 """
 SOSP — Testes Automatizados para os Scripts de Pré-Voo (Etapa 4A / Hardened).
 
-Valida a lógica diagnóstica de schema, prevenção de falsos positivos, detecção de estados
-parciais ou conflitantes, e resolução segura de credenciais.
+Valida:
+1. Resolução segura de senhas (exclusivamente via env ou getpass, sem flag CLI --password).
+2. Validação estrita de sslmode para conexões remotas (require ou superior, sem fallback para prefer/disable).
+3. Compatibilidade de sslmode com bancos locais (disable/prefer permitidos).
+4. Rejeição da opção CLI --password.
+5. Diagnóstico de schema: READY_FOR_BASELINE preliminar, detecção de conflitos, falso positivo, ALREADY_PROVISIONED.
 """
 
 import os
 import sys
+import subprocess
 import pytest
 
 from scripts.preflight_schema_inspection import (
     evaluate_schema_state,
+    validate_sslmode as validate_sslmode_schema,
+    resolve_password as resolve_password_schema,
     SOSP_EXPECTED_TABLES,
     SOSP_EXPECTED_VIEWS,
     EXPECTED_BASELINE_MIGRATIONS,
     DJANGO_CORE_TABLES,
 )
-from scripts.preflight_connectivity import resolve_password, mask_string
+from scripts.preflight_connectivity import (
+    validate_sslmode as validate_sslmode_conn,
+    resolve_password as resolve_password_conn,
+    mask_string,
+)
 
 
 def test_mask_string():
@@ -30,27 +41,70 @@ def test_mask_string():
 
 
 def test_resolve_password_priority(monkeypatch):
-    """Testa a cadeia de resolução segura de senhas sem getpass interativo."""
-    # 1. Prioridade para CLI argument
+    """Testa a cadeia de resolução segura de senhas via variáveis de ambiente."""
+    # 1. Prioridade para DB_PASSWORD sobre PGPASSWORD
     monkeypatch.setenv("DB_PASSWORD", "env_password")
-    assert resolve_password("cli_password") == "cli_password"
-
-    # 2. Prioridade para DB_PASSWORD sobre PGPASSWORD
     monkeypatch.setenv("PGPASSWORD", "pg_password")
-    assert resolve_password("", "localhost") == "env_password"
+    assert resolve_password_conn("localhost") == "env_password"
+    assert resolve_password_schema("localhost") == "env_password"
 
-    # 3. PGPASSWORD quando DB_PASSWORD não existe
+    # 2. PGPASSWORD quando DB_PASSWORD não existe
     monkeypatch.delenv("DB_PASSWORD")
-    assert resolve_password("", "localhost") == "pg_password"
+    assert resolve_password_conn("localhost") == "pg_password"
+    assert resolve_password_schema("localhost") == "pg_password"
 
-    # 4. Sem senha em host remoto e stdin não-tty (não deve quebrar com crash)
+    # 3. Sem senha em host remoto e stdin não-tty (não deve quebrar com crash)
     monkeypatch.delenv("PGPASSWORD")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    assert resolve_password("", "aws-1-sa-east-1.pooler.supabase.com") == ""
+    assert resolve_password_conn("aws-1-sa-east-1.pooler.supabase.com") == ""
+    assert resolve_password_schema("aws-1-sa-east-1.pooler.supabase.com") == ""
+
+
+def test_remote_host_sslmode_restrictions():
+    """Conexões remotas exigem 'require', 'verify-ca' ou 'verify-full'. Proíbem disable/prefer."""
+    remote_host = "aws-1-sa-east-1.pooler.supabase.com"
+
+    for func in (validate_sslmode_conn, validate_sslmode_schema):
+        # Modos aceitos em remoto
+        assert func("require", remote_host) == "require"
+        assert func("verify-ca", remote_host) == "verify-ca"
+        assert func("verify-full", remote_host) == "verify-full"
+        assert func("REQUIRE", remote_host) == "require"
+
+        # Modos proibidos em remoto
+        for forbidden in ("disable", "prefer", "allow"):
+            with pytest.raises(ValueError, match="Conexão remota rejeitada por governança de segurança"):
+                func(forbidden, remote_host)
+
+
+def test_local_host_sslmode_compatibility():
+    """Conexões locais (localhost, 127.0.0.1, socket Unix) preservam compatibilidade com prefer/disable."""
+    local_hosts = ("localhost", "127.0.0.1", "/tmp")
+
+    for func in (validate_sslmode_conn, validate_sslmode_schema):
+        for host in local_hosts:
+            assert func("disable", host) == "disable"
+            assert func("prefer", host) == "prefer"
+            assert func("require", host) == "require"
+
+
+def test_cli_password_argument_removed():
+    """Garante que a opção CLI --password foi totalmente removida dos scripts e gera erro se invocada."""
+    scripts_to_test = [
+        "scripts/preflight_connectivity.py",
+        "scripts/preflight_schema_inspection.py",
+    ]
+    base_dir = os.path.join(os.path.dirname(__file__), "../../../backend")
+
+    for script in scripts_to_test:
+        cmd = [sys.executable, script, "--password", "secret_pass"]
+        res = subprocess.run(cmd, cwd=base_dir, capture_output=True, text=True)
+        assert res.returncode != 0
+        assert "unrecognized arguments: --password" in res.stderr
 
 
 def test_evaluate_schema_clean_ready_for_baseline():
-    """Banco completamente vazio de tabelas deve retornar READY_FOR_BASELINE com código 0."""
+    """Banco completamente vazio de tabelas deve retornar READY_FOR_BASELINE preliminar com código 0."""
     status, msg, code, issues = evaluate_schema_state(
         existing_tables=[],
         existing_views=[],
@@ -63,6 +117,8 @@ def test_evaluate_schema_clean_ready_for_baseline():
     assert status == "READY_FOR_BASELINE"
     assert code == 0
     assert len(issues) == 0
+    assert "Avaliação preliminar" in msg
+    assert "NÃO constituindo autorização automática" in msg
 
 
 def test_evaluate_schema_clean_but_no_ddl_permission():
