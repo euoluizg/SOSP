@@ -1,4 +1,4 @@
-import { Agency, Appointment, AppointmentSlot, ProblemDetails, Protocol, Service, Unit } from "@/types/api";
+import { Agency, Appointment, AppointmentSlot, CitizenProfile, ProblemDetails, Protocol, Service, Unit } from "@/types/api";
 import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
@@ -215,8 +215,16 @@ export class ApiClient {
       MOCK_APPOINTMENTS.unshift(newAppt);
       return newAppt;
     }
+    const idempotencyKey =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `idemp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     return this.request("/appointments", {
       method: "POST",
+      headers: {
+        "Idempotency-Key": idempotencyKey,
+      },
       body: JSON.stringify(data),
     });
   }
@@ -252,6 +260,149 @@ export class ApiClient {
       body: JSON.stringify({ reason }),
     });
   }
+
+  /* --- Autenticação e Cidadão (RF-01, RF-02, RN-28..30) --- */
+  static async registerCitizen(data: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 300));
+      return { id: "citizen-new", ...data };
+    }
+    return this.request("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async login(cpf: string, password: string): Promise<{
+    token: string;
+    tokenType: string;
+    expiresIn: number;
+    citizen: {
+      id: string;
+      fullName: string;
+      cpf: string;
+      email: string;
+      role: string;
+    };
+  }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 300));
+      if (password === "erro") {
+        throw {
+          type: "https://sosp.al.gov.br/errors/401",
+          title: "Credenciais Inválidas",
+          status: 401,
+          detail: "CPF ou senha inválidos.",
+        } as ProblemDetails;
+      }
+      return {
+        token: "simulated-jwt-token-citizen-001",
+        tokenType: "Bearer",
+        expiresIn: 1800,
+        citizen: {
+          id: "citizen-001",
+          fullName: "Cidadão de Testes",
+          cpf: cpf.replace(/\D/g, ""),
+          email: "cidadao@exemplo.com.br",
+          role: "citizen",
+        },
+      };
+    }
+    return this.request("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ cpf, password }),
+    });
+  }
+
+  static async recoverPassword(cpf: string): Promise<{ message: string; codeSimulated?: string }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 200));
+      return { message: "Código enviado para o e-mail cadastrado.", codeSimulated: "123456" };
+    }
+    return this.request("/auth/recover-password", {
+      method: "POST",
+      body: JSON.stringify({ cpf }),
+    });
+  }
+
+  static async resetPassword(cpf: string, code: string, newPassword: string): Promise<{ message: string }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 200));
+      return { message: "Senha redefinida com sucesso." };
+    }
+    return this.request("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ cpf, code, newPassword }),
+    });
+  }
+
+  static async getCitizenMe(): Promise<CitizenProfile> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 100));
+      return {
+        id: "citizen-001",
+        cpf: "11144477705",
+        fullName: "Cidadão de Testes",
+        birthDate: "1990-05-15",
+        email: "cidadao@exemplo.com.br",
+        phone: "(82) 99988-7766",
+        gender: "Não informado",
+        isPcd: false,
+        motherName: "Maria de Testes",
+        cep: "57020-100",
+        street: "Rua do Comércio",
+        number: "123",
+        neighborhood: "Centro",
+        city: "Maceió",
+        state: "AL",
+      };
+    }
+    return this.request("/citizens/me");
+  }
+
+  /* --- Feedback, FAQ e Perguntas (RF-11) --- */
+  static async getFaqs(): Promise<Array<{ id: string; category: string; question: string; answer: string }>> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 100));
+      return [
+        {
+          id: "faq-01",
+          category: "Geral",
+          question: "Como agendar um atendimento no SOSP?",
+          answer: "Basta acessar o portal, buscar o serviço desejado, escolher a unidade de atendimento, a data e o horário disponível em slots de 30 minutos.",
+        },
+        {
+          id: "faq-02",
+          category: "Gov.br",
+          question: "Por que o botão Entrar com Gov.br abre uma mensagem de atualização?",
+          answer: "A integração oficial federada com a conta Gov.br está planejada para a versão 2.0 do SOSP.",
+        },
+      ];
+    }
+    return this.request("/feedback/faq");
+  }
+
+  static async openQuestion(data: {
+    citizenName: string;
+    email: string;
+    category: string;
+    subject: string;
+    description: string;
+  }): Promise<{ id: string; protocolNumber: string; status: string }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 200));
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      return {
+        id: `qst-${Date.now()}`,
+        protocolNumber: `${today}-9999`,
+        status: "open",
+      };
+    }
+    return this.request("/questions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 // Named exports for ease of consumption
@@ -264,3 +415,10 @@ export const createAppointment = ApiClient.createAppointment.bind(ApiClient);
 export const getCitizenAppointments = ApiClient.getCitizenAppointments.bind(ApiClient);
 export const getAppointmentByProtocol = ApiClient.getAppointmentByProtocol.bind(ApiClient);
 export const cancelAppointment = ApiClient.cancelAppointment.bind(ApiClient);
+export const registerCitizen = ApiClient.registerCitizen.bind(ApiClient);
+export const loginCitizen = ApiClient.login.bind(ApiClient);
+export const recoverPassword = ApiClient.recoverPassword.bind(ApiClient);
+export const resetPassword = ApiClient.resetPassword.bind(ApiClient);
+export const getCitizenMe = ApiClient.getCitizenMe.bind(ApiClient);
+export const getFaqs = ApiClient.getFaqs.bind(ApiClient);
+export const openQuestion = ApiClient.openQuestion.bind(ApiClient);

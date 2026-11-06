@@ -27,6 +27,8 @@ import {
   isValidBirthDate,
   validatePasswordStrength,
 } from "@/utils/validations";
+import { registerCitizen } from "@/services/apiClient";
+import type { ProblemDetails } from "@/types/api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -57,6 +59,7 @@ export default function RegisterPage() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const [isSearchingCep, setIsSearchingCep] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -171,18 +174,56 @@ export default function RegisterPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setApiError(null);
     if (!validateForm()) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await registerCitizen({
+        fullName: formData.fullName,
+        cpf: formData.cpf,
+        birthDate: formData.birthDate,
+        gender: formData.gender,
+        motherName: formData.motherName,
+        email: formData.email,
+        phone: formData.mobilePhone || formData.landlinePhone,
+        mobilePhone: formData.mobilePhone,
+        landlinePhone: formData.landlinePhone,
+        password: formData.password,
+        isPcd: formData.isPcd,
+        pcdDetails: formData.disabilityType,
+        disabilityType: formData.disabilityType,
+        cep: formData.cep,
+        zipCode: formData.cep,
+        street: formData.street,
+        number: formData.number,
+        complement: formData.complement,
+        neighborhood: formData.neighborhood,
+        city: formData.city,
+        state: formData.state,
+      });
       setSubmitSuccess(true);
-    }, 1200);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      if (problem?.errors && problem.errors.length > 0) {
+        const mappedErrors: Record<string, string> = {};
+        problem.errors.forEach((e) => {
+          mappedErrors[e.field] = e.message;
+        });
+        setErrors((prev) => ({ ...prev, ...mappedErrors }));
+        setApiError(problem.detail || "Verifique os campos destacados em vermelho.");
+      } else {
+        setApiError(problem?.detail || "Erro ao conectar ao servidor. Tente novamente mais tarde.");
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const passStrength = validatePasswordStrength(formData.password);
@@ -236,6 +277,13 @@ export default function RegisterPage() {
 
         {/* Formulário Principal */}
         <form onSubmit={handleSubmit} className="space-y-8" noValidate>
+          {apiError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700 text-sm font-medium">
+              <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />
+              <span>{apiError}</span>
+            </div>
+          )}
+
           {/* Seção 1: Dados Pessoais */}
           <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200">
             <div className="flex items-center gap-3 pb-4 mb-6 border-b border-gray-100">

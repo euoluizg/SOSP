@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { openQuestion } from "@/services/apiClient";
 
 interface FaqItem {
   id: string;
@@ -86,17 +87,27 @@ export default function FaqPage() {
     return true;
   });
 
-  const handleSubmitQuestion = (e: React.FormEvent) => {
+  const handleSubmitQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userQuestion || !userEmail) return;
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await openQuestion({
+        citizenName: "Cidadão Anônimo",
+        email: userEmail,
+        category: activeCategory !== "all" ? activeCategory : "Geral",
+        subject: "Dúvida enviada pelo portal FAQ",
+        description: userQuestion,
+      });
       setSubmitted(true);
       setUserQuestion("");
       setUserEmail("");
-    }, 800);
+    } catch (err) {
+      console.error("Erro ao enviar dúvida:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

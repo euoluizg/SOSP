@@ -17,6 +17,14 @@ class UnitSlotsView(APIView):
 
 class AppointmentCreateListView(APIView):
     def post(self, request):
+        idempotency_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+        if not idempotency_key:
+            raise ProblemDetailsException(
+                detail="O cabeçalho 'Idempotency-Key' é obrigatório para criação de agendamento.",
+                title="Cabeçalho Ausente",
+                status_code=400,
+            )
+
         serializer = CreateAppointmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data

@@ -66,6 +66,10 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.Argon2PasswordHasher",
 ]
 
+# Sessão expira após 30 minutos de inatividade (RN-28)
+SESSION_COOKIE_AGE = 1800
+SESSION_SAVE_EVERY_REQUEST = True
+
 LANGUAGE_CODE = "pt-br"
 TIME_ZONE = "America/Maceio"
 USE_I18N = True
