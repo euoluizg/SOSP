@@ -324,4 +324,152 @@ class CatalogInMemoryRepository:
     def get_categories(self) -> List[str]:
         return self._categories
 
-catalog_repository = CatalogInMemoryRepository()
+_catalog_memory_repository = CatalogInMemoryRepository()
+
+
+class CatalogDjangoORMRepository:
+    """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
+
+    def get_agencies(self) -> List[Dict[str, Any]]:
+        from .models import Agency
+        agencies = Agency.objects.filter(is_active=True, deleted_at__isnull=True).order_by("name")
+        return [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "acronym": a.acronym,
+                "description": a.description or "",
+                "isActive": a.is_active,
+            }
+            for a in agencies
+        ]
+
+    def get_agency_by_id(self, agency_id: str) -> Optional[Dict[str, Any]]:
+        from .models import Agency
+        a = Agency.objects.filter(id=agency_id, is_active=True, deleted_at__isnull=True).first()
+        if not a:
+            return None
+        return {
+            "id": str(a.id),
+            "name": a.name,
+            "acronym": a.acronym,
+            "description": a.description or "",
+            "isActive": a.is_active,
+        }
+
+    def get_units(self, agency_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        from .models import Unit
+        qs = Unit.objects.filter(is_active=True, deleted_at__isnull=True).select_related("agency").order_by("name")
+        if agency_id:
+            qs = qs.filter(agency_id=agency_id)
+        return [
+            {
+                "id": str(u.id),
+                "agencyId": str(u.agency_id),
+                "name": u.name,
+                "street": u.street,
+                "number": u.address_number,
+                "neighborhood": u.neighborhood,
+                "city": u.city,
+                "state": u.state,
+                "zipCode": u.zip_code,
+                "phone": u.phone or "",
+                "dailyCapacity": u.daily_limit,
+                "latitude": float(u.latitude) if u.latitude is not None else None,
+                "longitude": float(u.longitude) if u.longitude is not None else None,
+                "isActive": u.is_active,
+            }
+            for u in qs
+        ]
+
+    def get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
+        from .models import Unit
+        u = Unit.objects.filter(id=unit_id, is_active=True, deleted_at__isnull=True).first()
+        if not u:
+            return None
+        return {
+            "id": str(u.id),
+            "agencyId": str(u.agency_id),
+            "name": u.name,
+            "street": u.street,
+            "number": u.address_number,
+            "neighborhood": u.neighborhood,
+            "city": u.city,
+            "state": u.state,
+            "zipCode": u.zip_code,
+            "phone": u.phone or "",
+            "dailyCapacity": u.daily_limit,
+            "latitude": float(u.latitude) if u.latitude is not None else None,
+            "longitude": float(u.longitude) if u.longitude is not None else None,
+            "isActive": u.is_active,
+        }
+
+    def get_services(self) -> List[Dict[str, Any]]:
+        from .models import Service
+        qs = Service.objects.filter(status="active", deleted_at__isnull=True).order_by("name")
+        return [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "summary": s.detailed_description[:120] if s.detailed_description else "",
+                "description": s.detailed_description,
+                "category": s.category,
+                "channel": s.channel,
+                "cost": "Gratuito" if s.is_free else (f"R$ {s.cost_amount:.2f}" if s.cost_amount else "Pago"),
+                "estimatedDuration": f"{s.average_deadline_days} dias" if s.average_deadline_days else "Imediato",
+                "isActive": s.status == "active",
+            }
+            for s in qs
+        ]
+
+    def get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
+        from .models import Service, ServiceStep, ServiceDocument
+        s = Service.objects.filter(id=service_id, deleted_at__isnull=True).first()
+        if not s:
+            return None
+        steps = [
+            {"stepNumber": step.step_order, "title": step.title, "description": step.description}
+            for step in ServiceStep.objects.filter(service=s).order_by("step_order")
+        ]
+        documents = [
+            {"name": doc.name, "isRequired": doc.is_mandatory, "description": doc.template_url or ""}
+            for doc in ServiceDocument.objects.filter(service=s).order_by("name")
+        ]
+        return {
+            "id": str(s.id),
+            "name": s.name,
+            "summary": s.detailed_description[:120] if s.detailed_description else "",
+            "description": s.detailed_description,
+            "category": s.category,
+            "channel": s.channel,
+            "cost": "Gratuito" if s.is_free else (f"R$ {s.cost_amount:.2f}" if s.cost_amount else "Pago"),
+            "estimatedDuration": f"{s.average_deadline_days} dias" if s.average_deadline_days else "Imediato",
+            "targetAudience": s.eligibility,
+            "steps": steps,
+            "documents": documents,
+            "isActive": s.status == "active",
+        }
+
+    def get_categories(self) -> List[str]:
+        from .models import Service
+        cats = Service.objects.filter(status="active", deleted_at__isnull=True).values_list("category", flat=True).distinct()
+        result = ["Todos"]
+        result.extend(sorted(list(set(cats))))
+        return result
+
+
+def get_catalog_repository():
+    from django.conf import settings
+    if getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm":
+        return CatalogDjangoORMRepository()
+    return _catalog_memory_repository
+
+
+class CatalogRepositoryProxy:
+    """Proxy dinâmico que seleciona a implementação configurada (memory ou orm)."""
+    def __getattr__(self, name):
+        repo = get_catalog_repository()
+        return getattr(repo, name)
+
+
+catalog_repository = CatalogRepositoryProxy()
