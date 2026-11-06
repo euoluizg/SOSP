@@ -6,6 +6,14 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.
 
 ---
 
+## [Unreleased]
+
+### Adicionado
+
+- **Quality Gates e Governança (.github/workflows):** Implantação dos 4 Quality Gates automatizados e fluxo de Pull Requests via GitHub App (`sosp-agents-bot`), com aprovação formal obrigatória do CODEOWNER (`@euoluizg`).
+
+---
+
 ## [1.1.0] — 2026-11-01
 
 ### Adicionado

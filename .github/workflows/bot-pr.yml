@@ -39,7 +39,7 @@ jobs:
           INPUT_TITLE: ${{ inputs.title }}
         run: |
           # 1. Validação estrita de formato de branch (sem injeção de comandos ou flags)
-          if ! [[ "$INPUT_BRANCH" =~ ^[a-zA-Z0-9_\-\.\/]+$ ]] || [[ "$INPUT_BRANCH" =~ \.\. ]] || [[ "$INPUT_BRANCH" =~ ^- ]]; then
+          if ! [[ "$INPUT_BRANCH" =~ ^[-a-zA-Z0-9_./]+$ ]] || [[ "$INPUT_BRANCH" == *".."* ]] || [[ "$INPUT_BRANCH" == -* ]]; then
             echo "::error::Nome de branch inválido ou inseguro: '$INPUT_BRANCH'"
             exit 1
           fi
