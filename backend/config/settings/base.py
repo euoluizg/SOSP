@@ -53,13 +53,43 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Banco de dados em memória isolado para esta fase (sem PostgreSQL / Supabase)
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
+# Configuração de Banco de Dados Multi-ambiente (ADR-001, ADR-002, Etapa 3)
+# Suporta SQLite em memória (padrão para testes offline) e PostgreSQL (local/isolado/Supabase futuro)
+DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite3").lower()
+
+if DB_ENGINE in ("postgresql", "postgres"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "sosp_local"),
+            "USER": os.environ.get("DB_USER", "postgres"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST", "localhost"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+            "OPTIONS": {},
+        }
     }
-}
+    # Modo SSL (ex.: 'require' para conexões remotas seguras)
+    db_sslmode = os.environ.get("DB_SSLMODE")
+    if db_sslmode:
+        DATABASES["default"]["OPTIONS"]["sslmode"] = db_sslmode
+
+    # Compatibilidade com Pooler de Transação (PgBouncer/Supavisor do Supabase na porta 6543):
+    # Desativa cursores do lado do servidor se a variável estiver ativa
+    if os.environ.get("DB_DISABLE_SERVER_SIDE_CURSORS", "false").lower() in ("true", "1", "yes"):
+        DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("SQLITE_NAME", ":memory:"),
+        }
+    }
+
+# Seleção da Estratégia de Repositório de Persistência (ADR-001 / Etapa 3):
+# 'memory' (simulado em memória, retrocompatível) ou 'orm' (PostgreSQL real via Django ORM)
+REPOSITORY_BACKEND = os.environ.get("REPOSITORY_BACKEND", "memory").lower()
 
 # Autenticação e Hasher Argon2id (RF-01, RF-02, ADR-003)
 PASSWORD_HASHERS = [
