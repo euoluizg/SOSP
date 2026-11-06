@@ -54,12 +54,33 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Configuração de Banco de Dados Multi-ambiente (ADR-001, ADR-002, Etapa 3 e Etapa 4A)
-# Suporta SQLite em memória (padrão para testes offline) e PostgreSQL (local/isolado/Supabase)
-DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite3").lower()
+# Suporta SQLite em memória (padrão para testes offline/CI) e PostgreSQL (local/isolado/Supabase)
+from django.core.exceptions import ImproperlyConfigured
 
-if DB_ENGINE in ("postgresql", "postgres"):
-    from django.core.exceptions import ImproperlyConfigured
+raw_db_engine = os.environ.get("DB_ENGINE", "sqlite3").strip().lower()
+is_remote_required = os.environ.get("DB_REMOTE_REQUIRED", "false").lower() in ("true", "1", "yes")
 
+POSTGRES_ALIASES = ("postgresql", "postgres", "django.db.backends.postgresql")
+SQLITE_ALIASES = ("sqlite3", "sqlite", "django.db.backends.sqlite3")
+
+if raw_db_engine in POSTGRES_ALIASES:
+    DB_ENGINE = "postgresql"
+elif raw_db_engine in SQLITE_ALIASES:
+    DB_ENGINE = "sqlite3"
+else:
+    raise ImproperlyConfigured(
+        f"Mecanismo de banco de dados desconhecido: '{raw_db_engine}'. "
+        f"Valores suportados: {POSTGRES_ALIASES + SQLITE_ALIASES}. "
+        "Fallback silencioso para SQLite é proibido por governança."
+    )
+
+if is_remote_required and DB_ENGINE == "sqlite3":
+    raise ImproperlyConfigured(
+        "DB_REMOTE_REQUIRED está ativo, mas DB_ENGINE está configurado como SQLite. "
+        "A aplicação não pode selecionar SQLite sob nenhuma circunstância em modo remoto."
+    )
+
+if DB_ENGINE == "postgresql":
     db_name = os.environ.get("DB_NAME", "sosp_local")
     db_user = os.environ.get("DB_USER", "postgres")
     db_password = os.environ.get("DB_PASSWORD", "")
@@ -67,7 +88,6 @@ if DB_ENGINE in ("postgresql", "postgres"):
     db_port = os.environ.get("DB_PORT", "5432")
 
     is_remote = db_host not in ("localhost", "127.0.0.1", "") and not db_host.startswith("/")
-    is_remote_required = os.environ.get("DB_REMOTE_REQUIRED", "false").lower() in ("true", "1", "yes")
 
     # Falha explícita se PostgreSQL remoto for selecionado e a configuração estiver incompleta
     if (is_remote or is_remote_required) and (not db_password or not db_user or not db_name or not db_host):
@@ -121,8 +141,13 @@ else:
     }
 
 # Seleção da Estratégia de Repositório de Persistência (ADR-001 / Etapa 3):
-# 'memory' (simulado em memória, retrocompatível) ou 'orm' (PostgreSQL real via Django ORM)
-REPOSITORY_BACKEND = os.environ.get("REPOSITORY_BACKEND", "memory").lower()
+# 'memory' (padrão até implantação real do banco) ou 'orm' (PostgreSQL real via Django ORM)
+REPOSITORY_BACKEND = os.environ.get("REPOSITORY_BACKEND", "memory").strip().lower()
+if REPOSITORY_BACKEND not in ("memory", "orm"):
+    raise ImproperlyConfigured(
+        f"REPOSITORY_BACKEND inválido: '{REPOSITORY_BACKEND}'. "
+        "Valores permitidos: 'memory' (padrão) ou 'orm'."
+    )
 
 # Autenticação e Hasher Argon2id (RF-01, RF-02, ADR-003)
 PASSWORD_HASHERS = [
