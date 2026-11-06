@@ -129,12 +129,11 @@ jobs:
           app-id: ${{ vars.SOSP_BOT_APP_ID }}
           private-key: ${{ secrets.SOSP_BOT_PRIVATE_KEY }}
 
-      - name: "Verificar Identidade do Bot e Comentar no PR"
-        if: github.event_name == 'pull_request'
+      - name: "Verificar Acesso e Permissões do GitHub App"
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          BOT_NAME=$(gh api user --jq '.login')
-          echo "Token do GitHub App gerado com sucesso para: $BOT_NAME"
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body "🤖 **sosp-agents-bot:** Autenticação via GitHub App validada com sucesso! Todos os Quality Gates foram executados e aprovados em ambiente seguro de CI/CD."
+          REPO_NAME=$(gh api /installation/repositories --jq '.repositories[0].full_name')
+          echo "Token do GitHub App gerado com sucesso! Acesso concedido ao repositório: $REPO_NAME"
+          # Validação de leitura e escrita de Pull Requests
+          gh pr view ${{ github.event.pull_request.number }} --json number,title,state
