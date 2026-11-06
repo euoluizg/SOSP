@@ -1,0 +1,24 @@
+# Python & Django Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tests & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Database & SQLite
+*.sqlite3
+db.sqlite3
+
+# Logs
+*.log
+
