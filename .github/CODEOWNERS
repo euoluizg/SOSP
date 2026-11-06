@@ -6,6 +6,11 @@
 # Padrão global do repositório
 *                               @euoluizg
 
+# Infraestrutura CI/CD e Governança do Repositório (exclusivo do proprietário)
+/.github/                       @euoluizg
+/.github/CODEOWNERS             @euoluizg
+/.github/workflows/             @euoluizg
+
 # Documentação, Contrato de API e Schema de Banco (exigem revisão conjunta)
 /docs/                          @euoluizg
 /docs/api/openapi.yaml          @euoluizg
