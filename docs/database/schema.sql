@@ -738,7 +738,8 @@ BEGIN;
   -- =============================================================================
   
   -- View 1: Busca Unificada de Serviços no Catálogo (Unindo órgãos e sinônimos)
-  CREATE OR REPLACE VIEW vw_catalogServiceSearch AS
+  -- Nota de Segurança (RLS): Definida com security_invoker = true para evitar bypass de RLS nas tabelas base
+  CREATE OR REPLACE VIEW vw_catalogServiceSearch WITH (security_invoker = true) AS
   SELECT 
     s.id AS serviceId,
     s.name AS serviceName,
@@ -760,7 +761,8 @@ BEGIN;
   GROUP BY s.id, a.id;
   
   -- View 2: Disponibilidade em Tempo Real de Slots de Agendamento por Unidade
-  CREATE OR REPLACE VIEW vw_schedulingSlotAvailability AS
+  -- Nota de Segurança (RLS): Definida com security_invoker = true para respeitar políticas de acesso do chamador
+  CREATE OR REPLACE VIEW vw_schedulingSlotAvailability WITH (security_invoker = true) AS
   SELECT 
     slot.id AS slotId,
     slot.unitId,
