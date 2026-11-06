@@ -54,13 +54,14 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           # Verifica se já existe PR aberto para esta branch
-          EXISTING_PR=$(gh pr list --head "${{ inputs.branch }}" --base develop --json number --jq '.[0].number')
+          EXISTING_PR=$(gh pr list --repo "${{ github.repository }}" --head "${{ inputs.branch }}" --base develop --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
             echo "PR #$EXISTING_PR já existe para a branch ${{ inputs.branch }}."
-            gh pr edit "$EXISTING_PR" --title "${{ inputs.title }}" --body "${{ inputs.body }}"
+            gh pr edit "$EXISTING_PR" --repo "${{ github.repository }}" --title "${{ inputs.title }}" --body "${{ inputs.body }}"
             echo "pr_url=https://github.com/${{ github.repository }}/pull/$EXISTING_PR" >> "$GITHUB_OUTPUT"
           else
             PR_URL=$(gh pr create \
+              --repo "${{ github.repository }}" \
               --base develop \
               --head "${{ inputs.branch }}" \
               --title "${{ inputs.title }}" \

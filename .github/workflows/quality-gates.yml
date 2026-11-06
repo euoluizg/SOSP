@@ -132,8 +132,15 @@ jobs:
       - name: "Verificar Acesso e Permissões do GitHub App"
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           REPO_NAME=$(gh api /installation/repositories --jq '.repositories[0].full_name')
           echo "Token do GitHub App gerado com sucesso! Acesso concedido ao repositório: $REPO_NAME"
-          # Validação de leitura e escrita de Pull Requests
-          gh pr view ${{ github.event.pull_request.number }} --json number,title,state
+          # Validação de leitura de Pull Requests conforme contexto de execução
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            echo "Contexto de Pull Request detectado (PR #${{ github.event.pull_request.number }})."
+            gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json number,title,state
+          else
+            echo "Contexto de push/workflow_dispatch detectado. Listando PRs abertos..."
+            gh pr list --repo ${{ github.repository }} --limit 1
+          fi
