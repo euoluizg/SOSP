@@ -251,7 +251,7 @@ O arquivo `backend/config/settings/base.py` foi atualizado para carregar dinamic
 | `DB_NAME` | `db.sqlite3` | `postgres` | Nome da base de dados |
 | `DB_USER` | `""` | `postgres` | Usuário do PostgreSQL |
 | `DB_PASSWORD` | `""` | `[SECRET]` | Senha do banco |
-| `DB_HOST` | `""` | `aws-0-sa-east-1.pooler.supabase.com` | Host do pooler Supabase em São Paulo |
+| `DB_HOST` | `""` | `aws-1-sa-east-1.pooler.supabase.com` | Host do pooler Supabase em São Paulo (confirmado pelo proprietário) |
 | `DB_PORT` | `""` | `6543` (Pooler) / `5432` (Direct) | Porta de conexão |
 | `DB_SSLMODE` | `prefer` | `require` | Exigência de TLS/SSL |
 | `DB_DISABLE_SERVER_SIDE_CURSORS` | `false` | `true` | Obrigatório para PgBouncer em modo Transaction |

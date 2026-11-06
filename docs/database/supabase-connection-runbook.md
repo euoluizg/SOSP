@@ -1,277 +1,264 @@
 # SOSP — Runbook Operacional de Conexão com o Supabase PostgreSQL
 
-> **Ambiente Alvo:** Supabase PostgreSQL 17 gerenciado (Região `sa-east-1` — São Paulo, AWS)  
+> **Ambiente Alvo:** Supabase PostgreSQL 17 gerenciado (Região `sa-east-1` — São Paulo, AWS — Supabase Free Tier)  
 > **Framework:** Django 5.1.15 + Django REST Framework + `psycopg` 3.2+  
-> **Status:** Preparação Local Concluída — **Aguardando Liberação para Pré-Voo Remoto**  
+> **Status:** Preparação Local e Hardening Concluídos — **Aguardando Liberação para Primeiro Pré-Voo Remoto Somente Leitura**  
 > **Referências Normativas:** [`ADR-001`](../adr/ADR-001-monolito-modular-django-nextjs.md), [`ADR-002`](../adr/ADR-002-convencoes-nomenclatura-sql-camelcase.md), [`ADR-003`](../adr/ADR-003-autenticacao-autorizacao-rbac.md), [`ADR-005`](../adr/ADR-005-reserva-atomica-agendamento-idempotencia.md), [`ADR-008`](../adr/ADR-008-supabase-postgresql-gerenciado.md), [`schema.sql`](schema.sql), [`django-postgresql-foundation.md`](django-postgresql-foundation.md).
 
 ---
 
-## 1. Visão Geral e Arquitetura de Rede
+## 1. Visão Geral e Parâmetros Oficiais Confirmados
 
 O SOSP utiliza um banco de dados relacional **PostgreSQL 17** hospedado no **Supabase** na região de São Paulo (`sa-east-1`). No padrão arquitetural do projeto, o portal Next.js 15 **nunca** acessa o banco diretamente; todo o tráfego de dados é intermediado pela API REST do Django (`ADR-001 §1`).
 
-Para garantir segurança, resiliência e estabilidade, a conexão entre o Django e o Supabase deve respeitar os diferentes modos de pooling e topologias de rede disponibilizadas pela infraestrutura do Supabase.
+### Parâmetros Oficiais Confirmados pelo Proprietário do Projeto:
+Os parâmetros de conectividade foram visualmente verificados e confirmados no painel oficial do Supabase:
+- **Método de Conexão:** Session Pooler (Supavisor)
+- **Host Oficial:** `aws-1-sa-east-1.pooler.supabase.com`
+- **Porta:** `5432`
+- **Database:** `postgres`
+- **Username:** Valor exato do painel Connect no formato `postgres.<project-ref>`
+- **SSL Mode:** `require` (no mínimo)
+
+> [!CAUTION]
+> **Host Incorreto em Documentações Anteriores:**  
+> Versões preliminares citavam erroneamente `aws-0-sa-east-1.pooler.supabase.com`. **NÃO utilize `aws-0-...`**. O host validado e atribuído pelo Supabase a este projeto é estritamente **`aws-1-sa-east-1.pooler.supabase.com`**.  
+> Nunca deduza ou invente hosts, portas ou identificadores de projeto (`project-ref`).
 
 ```mermaid
 flowchart TD
     subgraph AppServer["Servidor de Aplicação (Render / Local)"]
-        DjangoApp["Django 5 Runtime (Gunicorn/Uvicorn)"]
-        DjangoMigrate["Django Migrations (CI/CD ou Deploy Job)"]
-        DiagScripts["Scripts de Pré-Voo (backend/scripts/)"]
+        DjangoApp["Django 5 Runtime (Gunicorn/Uvicorn)\nREPOSITORY_BACKEND=memory (padrão)"]
+        DjangoMigrate["Django Migrations (CI/CD ou Deploy Job)\nSession Pooler (Porta 5432)"]
+        DiagScripts["Scripts de Pré-Voo (backend/scripts/)\nSomente Leitura (Read-Only)"]
     end
 
-    subgraph SupabaseInfra["Infraestrutura Supabase (sa-east-1 / São Paulo)"]
-        subgraph Supavisor["Supavisor Connection Pooler (IPv4)"]
-            SessionPooler["Session Pooler (Porta 5432)"]
-            TxPooler["Transaction Pooler (Porta 6543)"]
+    subgraph SupabaseInfra["Infraestrutura Supabase (AWS sa-east-1 / São Paulo)"]
+        subgraph Supavisor["Supavisor Connection Pooler (IPv4 / Dual-Stack)"]
+            SessionPooler["Session Pooler (Porta 5432)\n★ aws-1-sa-east-1.pooler.supabase.com"]
+            TxPooler["Transaction Pooler (Porta 6543)\n(Stateless / DISABLE_SERVER_SIDE_CURSORS)"]
         end
-        DirectConn["Direct PostgreSQL Engine (Porta 5432 / IPv6)"]
-        PostgresDB[("PostgreSQL 17 Engine\n(36 tabelas + 2 views)")]
-        DataAPI["Supabase PostgREST (Data API HTTP)"]
+        DirectConn["Direct PostgreSQL Engine (Porta 5432 / IPv6 Exclusivo no Free Tier)"]
+        PostgresDB[("PostgreSQL 17 Engine\n(36 tabelas SOSP + 2 views)")]
+        DataAPI["Supabase PostgREST (Data API HTTP)\n[VERIFICAÇÃO OBRIGATÓRIA / DESATIVAR]"]
     end
 
-    DjangoApp -->|Recomendado em Produção / Render| SessionPooler
-    DjangoApp -.->|Alta Concorrência Leitura/Escrita| TxPooler
+    DjangoApp -->|Padrão Oficial: Runtime & Migrações| SessionPooler
+    DjangoApp -.->|Alta Concorrência Leitura| TxPooler
     DjangoMigrate -->|Obrigatório: DDL Suportado| SessionPooler
     DjangoMigrate -.->|Alternativa com suporte IPv6| DirectConn
-    DiagScripts -->|Validação Prévia| SessionPooler
+    DiagScripts -->|Validação Prévia Somente Leitura| SessionPooler
 
     SessionPooler --> PostgresDB
     TxPooler --> PostgresDB
     DirectConn --> PostgresDB
 
-    DataAPI -.->|BLOQUEADO / Desativado no SOSP| PostgresDB
+    DataAPI -.->|Restringir no Painel Supabase| PostgresDB
 ```
 
 ---
 
-## 2. Modos de Conexão: Comparativo Técnico e Recomendações
+## 2. Modos de Conexão: Comparativo Técnico
 
-O Supabase oferece três portas/métodos de acesso ao banco. É crucial escolher o método adequado para cada tipo de carga:
+O Supabase oferece três portas/métodos de acesso ao banco:
 
-| Critério | Modo A: Direct Connection | Modo B: Session Pooler (Recomendado) | Modo C: Transaction Pooler |
+| Critério | Modo A: Direct Connection | Modo B: Session Pooler (Padrão Oficial) | Modo C: Transaction Pooler |
 | :--- | :--- | :--- | :--- |
-| **Host** | `db.<project-ref>.supabase.co` | `aws-0-sa-east-1.pooler.supabase.com` | `aws-0-sa-east-1.pooler.supabase.com` |
-| **Porta** | `5432` | `5432` | `6543` |
+| **Host** | `db.<project-ref>.supabase.co` | **`aws-1-sa-east-1.pooler.supabase.com`** | **`aws-1-sa-east-1.pooler.supabase.com`** |
+| **Porta** | `5432` | **`5432`** | `6543` |
 | **Pilha IP** | **IPv6 Exclusivo** (no plano Free) | **IPv4 / IPv6** (Dual-Stack) | **IPv4 / IPv6** (Dual-Stack) |
-| **Usuário** | `postgres` (ou custom) | `postgres.<project-ref>` | `postgres.<project-ref>` |
+| **Formato Usuário** | `postgres` | `postgres.<project-ref>` | `postgres.<project-ref>` |
 | **Estado da Sessão** | Preservado | Preservado | **Descartado após transação** |
 | **Prepared Statements** | Suportado | Suportado | Limitado / Requer atenção |
 | **Server-Side Cursors** | Suportado | Suportado | **Incompatível** (`DISABLE_SERVER_SIDE_CURSORS = True`) |
 | **Suporte a Migrations DDL** | **Total** | **Total** | **NÃO** (pode falhar com locks e DDL transacional) |
-| **Compatibilidade com Render** | **Baixa** (Render não suporta IPv6 outbound) | **Excelente** (Padrão recomendado) | Boa para runtime, proibido para DDL |
-| **Uso no SOSP** | Conexões locais via IPv6 | **Runtime e Migrações (Padrão Oficial)** | Opcional para workloads de alta volumetria de leitura |
+| **Compatibilidade com Render** | **Incompatível** (Render não suporta IPv6 outbound) | **100% Compatível (Recomendado)** | Compatível apenas para runtime |
+| **Uso no SOSP** | Conexões locais via IPv6 | **Runtime e Migrações (Padrão Oficial)** | Opcional para workloads stateless |
 
 > [!IMPORTANT]
-> **Atenção especial ao Render.com:** O ambiente do Render não possui suporte nativo a roteamento IPv6 externo. Conexões diretas (`db.<project-ref>.supabase.co`) falharão com erro de timeout ou rede inacessível. **Utilize sempre o Session Pooler (Porta 5432) no host do pooler** para deploys no Render.
+> **Compatibilidade com Render.com:** O ambiente padrão do Render não possui suporte a roteamento IPv6 de saída. Conexões diretas (`db.<project-ref>.supabase.co`) falharão com erro de timeout ou rede inacessível. **Utilize exclusivamente o Session Pooler (`aws-1-sa-east-1.pooler.supabase.com:5432`)** para qualquer deploy no Render.
 
 ---
 
-## 3. Passo a Passo de Extração das Credenciais no Supabase
+## 3. Padrão de Configuração Django (`backend/config/settings/base.py`)
 
-Para configurar as variáveis de ambiente sem expor segredos nem gerar erros de autenticação:
+A padronização das variáveis de ambiente de banco de dados segue regras estritas de governança:
 
-1. Acesse o [Supabase Dashboard](https://supabase.com/dashboard) e entre na organização do projeto SOSP.
-2. Selecione o projeto provisionado na região **São Paulo (`sa-east-1`)**.
-3. No topo da página do projeto, clique no botão **"Connect"** (ao lado de "Project settings").
-4. Na aba **"Connection parameters"** ou **"URI"**:
-   - **Para Session Pooler (Recomendado):**
-     - Selecione **"Connection Pooling"** e método **"Session"**.
-     - Host: `aws-0-sa-east-1.pooler.supabase.com`
-     - Porta: `5432`
-     - Database: `postgres`
-     - User: `postgres.<PROJECT_REF>`
-   - **Para Direct Connection (Somente redes com IPv6):**
-     - Selecione **"Direct Connection"**.
-     - Host: `db.<PROJECT_REF>.supabase.co`
-     - Porta: `5432`
-     - Database: `postgres`
-     - User: `postgres`
-5. **Senha do Banco (`DB_PASSWORD`):**
-   - Corresponde à senha definida no momento do provisionamento do projeto.
-   - Caso tenha sido perdida, vá em **Project Settings > Database > Database password** e clique em **"Reset database password"**. Guarde o valor seguro em um cofre de senhas (ex: 1Password / Bitwarden).
-6. **Mapeamento para Variáveis de Ambiente do SOSP:**
-
-```bash
-# Configuração para Produção / Homologação (Render / Session Pooler)
-REPOSITORY_BACKEND=orm
-DB_ENGINE=django.db.backends.postgresql
-DB_HOST=aws-0-sa-east-1.pooler.supabase.com
-DB_PORT=5432
-DB_NAME=postgres
-DB_USER=postgres.xxxxxxxxxxxxxxxxxxxx
-DB_PASSWORD="sua_senha_secreta_aqui"
-DB_SSLMODE=require
-DB_CONNECT_TIMEOUT=10
-DB_STATEMENT_TIMEOUT=30000
-DB_REMOTE_REQUIRED=true
-```
-
-> [!WARNING]
-> Nunca salve ou commite o arquivo `.env` com senhas reais no Git. Utilize variáveis de ambiente injetadas pelo painel do Render ou cofre de segredos do GitHub Actions (`Secrets`).
+1. **`DB_ENGINE`:**
+   - Formatos suportados: `postgresql`, `django.db.backends.postgresql`, `postgres`, `sqlite3`, `django.db.backends.sqlite3`.
+   - **Proibição de Fallback Silencioso:** Qualquer valor desconhecido gera imediatamente `ImproperlyConfigured`.
+2. **`DB_REMOTE_REQUIRED=true`:**
+   - Quando esta variável estiver ativa, a aplicação é **proibida de selecionar SQLite sob qualquer hipótese**. Se `DB_ENGINE` for `sqlite3` ou se faltarem credenciais remotas (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`), o Django abortará com `ImproperlyConfigured`.
+3. **`REPOSITORY_BACKEND=memory`:**
+   - Mantém-se como configuração **padrão** do repositório no MVP até que a base de dados remota seja formalmente implantada e validada.
+4. **Segurança de SSL e Timeouts:**
+   - Conexões remotas exigem `sslmode=require` (ou superior).
+   - Timeouts padrão configurados: `connect_timeout=10` e `statement_timeout=30000ms`.
 
 ---
 
-## 4. Matriz de Papéis (RBAC) e Segurança de Banco
+## 4. Matriz de Papéis (RBAC) e Não-Utilização de Contas Acadêmicas
 
-O projeto SOSP implementa estrita separação de privilégios (`ADR-003`).
+O projeto SOSP implementa estrita segregação de privilégios (`ADR-003`, `RS-01` e `RS-03`):
 
-### 4.1 Por que NÃO utilizar o usuário `postgres` (Superuser) no Runtime do Django?
-1. **Bypass de RLS (Row Level Security):** O superuser `postgres` ignora silenciosamente todas as políticas de RLS e regras de segregação de dados.
-2. **Exposição de Schemas Internos:** O superuser tem acesso irrestrito aos schemas internos do Supabase (`auth`, `storage`, `vault`, `graphql_public`), criando superfícies de ataque em caso de SQL Injection.
-3. **Privilégios DDL Excessivos:** Um bug ou injeção em runtime poderia executar `DROP TABLE`, `ALTER TABLE` ou `TRUNCATE`, violando a regra de persistência auditada (`RN-40`, `RS-05`).
-
-### 4.2 Matriz Recomendada de Papéis SQL
-
-Em produção, adote a segregação em dois papéis distintos:
-
-| Papel | Finalidade | Privilégios | Escopo |
-| :--- | :--- | :--- | :--- |
-| `sosp_migration_user` | Execução de Migrations e DDL | `CREATE`, `ALTER`, `DROP` em tabelas, views, triggers e sequences no schema `public`. | Utilizado **exclusivamente** durante pipelines de CI/CD ou deploys controlados. |
-| `sosp_app_user` (ou `sosp_operador_role`) | Runtime da API Django (Gunicorn/Uvicorn) | `SELECT`, `INSERT`, `UPDATE` nas 36 tabelas de aplicação e views. **`DELETE` revogado**. Sem direitos DDL. | Utilizado pela aplicação web em regime 24/7. |
-
-```sql
--- Exemplo de provisionamento de papel restrito para aplicação (executado via SQL Editor do Supabase)
-CREATE ROLE sosp_app_user WITH LOGIN PASSWORD 'senha_forte_gerada';
-GRANT CONNECT ON DATABASE postgres TO sosp_app_user;
-GRANT USAGE ON SCHEMA public TO sosp_app_user;
-
--- Permissões DML estritas (sem DELETE)
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO sosp_app_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO sosp_app_user;
-
--- Padrão para novas tabelas futuras
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE ON TABLES TO sosp_app_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO sosp_app_user;
-```
+1. **Separação Obrigatória entre Usuário de Aplicação e Usuário de Migrations:**
+   - **`sosp_migration_user`:** Utilizado exclusivamente por pipelines de CI/CD ou deploys controlados. Possui direitos DDL (`CREATE`, `ALTER`, `DROP` em tabelas, views, triggers e sequences no schema `public`).
+   - **`sosp_app_user`:** Utilizado pelo Django em runtime 24/7. Possui apenas permissões DML (`SELECT`, `INSERT`, `UPDATE`). **`DELETE` físico terminantemente revogado** (`RN-40`, `RS-05`). Não possui privilégios DDL.
+2. **Proibição de Contas Acadêmicas da 3AF em Produção:**
+   - As contas criadas no contexto acadêmico da 3AF (`sosp_leitor_role`, `sosp_operador_role`) com senhas de teste acadêmico **NÃO são credenciais de produção**. Não devem ser utilizadas no backend Django real nem vinculadas ao Supabase de produção.
+3. **Não Utilizar o Superuser `postgres` em Runtime:**
+   - O usuário default `postgres` ignora políticas de RLS e expõe schemas internos do Supabase (`auth`, `storage`, `vault`, `graphql_public`).
+4. **Salvaguarda Operacional:**
+   - **NÃO execute comandos remotos `GRANT`, `REVOKE` ou `CREATE ROLE` nesta etapa.** Quaisquer ajustes de papéis devem ser previamente planejados e autorizados pelo Tech Lead.
 
 ---
 
 ## 5. Cuidados com a Exposição via Supabase Data API (PostgREST)
 
-Por padrão, o Supabase expõe automaticamente todas as tabelas criadas no schema `public` através da sua API REST HTTP (PostgREST) em `https://<ref>.supabase.co/rest/v1/`.
+Por padrão, novas instâncias do Supabase expõem todas as tabelas criadas no schema `public` via HTTP REST (PostgREST) na URL `https://<ref>.supabase.co/rest/v1/`.
 
-### 5.1 Risco para a Arquitetura SOSP
-- O SOSP opera sob o modelo **Monólito Modular** onde todas as operações de cidadãos e servidores passam pela **API REST do Django** (`/api/v1/`), a qual aplica validação de schemas `RFC 7807`, auditoria imutável em `auditEvent`, verificação de integridade e regras de negócio.
-- Se o PostgREST estiver ativo no schema `public` sem RLS estrita, qualquer usuário com a chave pública `anonKey` do Supabase poderia consultar ou mutar tabelas diretamente, contornando a auditoria do Django.
-
-### 5.2 Ação Recomendada de Mitigação
-1. No painel do Supabase, acesse **Project Settings > API > Data API Settings**.
-2. No campo **"Exposed schemas"**, avalie remover `public` caso nenhuma funcionalidade de client-direct seja necessária, ou assegure que as roles `anon` e `authenticated` não tenham privilégios de consulta/escrita nas tabelas de negócio:
-
-```sql
--- Revogar permissões automáticas da API HTTP pública para tabelas do SOSP
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
-REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM anon, authenticated;
-```
+### 5.1 Diretriz de Segurança SOSP
+- O frontend Next.js consome exclusivamente os endpoints da API Django (`https://<api-domain>/api/v1/`), onde residem autenticação CPF/Argon2id, controle RBAC, validações RFC 7807 e auditoria imutável em `auditEvent`.
+- **Atenção:** **NÃO presuma que a Supabase Data API já esteja desabilitada.** É obrigatório verificar visualmente no painel do Supabase.
+- **Ação Recomendada no Painel:**
+  1. Acesse **Project Settings > API > Data API Settings**.
+  2. No campo **"Exposed schemas"**, desmarque o schema `public` se nenhum client direto for utilizado, ou garanta que as roles `anon` e `authenticated` não tenham privilégios concedidos nas tabelas de negócio do SOSP.
 
 ---
 
-## 6. Procedimento de Pré-Voo de Conectividade e Inspeção de Schema
+## 6. Procedimento Seguro de Pré-Voo (Scripts em `backend/scripts/`)
 
-Antes de rodar qualquer comando de migração ou inicialização no banco remoto, execute os scripts de diagnóstico criados em `backend/scripts/`.
+Os scripts de pré-voo foram desenhados para execução estritamente somente-leitura e não-destrutiva.
 
-### 6.1 Teste de Conectividade de Rede e SSL (`preflight_connectivity.py`)
-Valida a resolução DNS, o handshake TCP, a negociação TLS/SSL e a autenticação básica com `SELECT version(), current_database(), current_user;`.
+### 6.1 Tratamento Seguro de Senhas (Sem Flags Inseguras na CLI)
+> [!IMPORTANT]
+> **Nunca execute comandos passando `--password "$DB_PASSWORD"` diretamente na linha de comando.** Isso expõe senhas no histórico do shell (`.zsh_history`, `history`) e na listagem de processos do sistema operacional (`ps`).
+> Configure a senha na sessão do shell com `export DB_PASSWORD=...` (ou `export PGPASSWORD=...`) ou execute os scripts sem o parâmetro para que o terminal solicite a senha interativamente de forma oculta via `getpass`.
 
+### 6.2 Execução do Teste de Conectividade (`preflight_connectivity.py`)
 ```bash
-# Execução usando variáveis do ambiente atual
+# 1. Configurar variáveis na sessão segura do terminal (sem salvar em arquivos Git)
+export DB_HOST="aws-1-sa-east-1.pooler.supabase.com"
+export DB_PORT="5432"
+export DB_NAME="postgres"
+export DB_USER="postgres.<project-ref>"
+export DB_SSLMODE="require"
+export DB_PASSWORD="sua_senha_secreta"
+
+# 2. Executar o script de conectividade (lê do ambiente ou getpass)
 python backend/scripts/preflight_connectivity.py
-
-# Ou informando explicitamente os parâmetros do Supabase
-python backend/scripts/preflight_connectivity.py \
-  --host aws-0-sa-east-1.pooler.supabase.com \
-  --port 5432 \
-  --dbname postgres \
-  --user "postgres.<project-ref>" \
-  --password "$DB_PASSWORD" \
-  --sslmode require
 ```
 
-**Comportamento Esperado:**
-- Código de saída `0`.
-- Saída indicando resolução de IP, handshake bem-sucedido, versão do PostgreSQL (>= 17.0) e latência de ping.
-- Máscara completa de dados sensíveis em logs (senhas e URLs nunca são impressas).
+**Códigos de Retorno:**
+- `0`: Conectividade TCP/Socket, resolução DNS e handshake PostgreSQL/SSL aprovados.
+- `1`: Falha de rede, timeout, DNS ou autenticação (senhas mascaradas nos logs).
 
-### 6.2 Inspeção Estrutural de Schema (`preflight_schema_inspection.py`)
-Conecta em **modo estritamente somente leitura** (`default_transaction_read_only=on`) e gera o raio-X completo do banco.
+### 6.3 Execução da Inspeção de Schema (`preflight_schema_inspection.py`)
+Executa forçando `default_transaction_read_only=on`.
 
 ```bash
-python backend/scripts/preflight_schema_inspection.py \
-  --host aws-0-sa-east-1.pooler.supabase.com \
-  --port 5432 \
-  --dbname postgres \
-  --user "postgres.<project-ref>" \
-  --password "$DB_PASSWORD" \
-  --sslmode require
+python backend/scripts/preflight_schema_inspection.py
 ```
 
-**Diagnóstico Retornado:**
-- `🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE)`:
-  - 0 tabelas de aplicação SOSP encontradas.
-  - Tabela `django_migrations` ausente ou limpa.
-  - **Ação:** Autorizado a prosseguir com o comando `python manage.py migrate`.
-- `🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)`:
-  - As 36 tabelas de aplicação e 2 views já existem.
-  - Todas as migrations (11 registros) estão aplicadas.
-  - **Ação:** O banco está íntegro e em sincronia; nenhuma migração necessária.
-- `🟡 STATUS: ESTADO PARCIAL OU INCONSISTENTE (PARTIAL_STATE)`:
-  - Existem tabelas parciais ou discrepância na tabela de migrações.
-  - **Ação:** Interrompa a operação e investigue antes de aplicar migrações.
+**Matriz Diagnóstica de Saída:**
+- `🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE)` (Exit code `0`):
+  - Schema `public` limpo de tabelas, views e migrações.
+  - Permissão `CREATE` confirmada.
+  - Extensões `pg_trgm` e `unaccent` disponíveis.
+  - **Ação:** Autorizado para planejar aplicação da baseline.
+- `🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)` (Exit code `0`):
+  - Todas as 36 tabelas SOSP e 2 views presentes.
+  - Todas as 11 migrações Django registradas em `django_migrations`.
+  - Zero tabelas desconhecidas.
+  - **Ação:** Base íntegra e sincronizada.
+- `🟡 STATUS: ESTADO PARCIAL DETECTADO (PARTIAL_STATE)` (Exit code `2`):
+  - Tabelas ou migrações incompletas.
+  - **Ação:** Migração bloqueada. Requer investigação de integridade.
+- `⚠️ STATUS: REVISÃO MANUAL OBRIGATÓRIA (MANUAL_REVIEW_REQUIRED)` (Exit code `2`):
+  - Detectadas tabelas desconhecidas no schema `public`, views órfãs ou falta de permissões DDL.
+  - **Ação:** Migração bloqueada. Exige auditoria humana.
 
 ---
 
 ## 7. Instruções para Execução Segura de Migrations
 
-Após a validação de pré-voo com resultado `READY_FOR_BASELINE`:
+Após pré-voo com resultado `READY_FOR_BASELINE` e **autorização humana explícita do Tech Lead**:
 
-### 7.1 Pré-requisitos
-1. Conexão configurada via **Session Pooler (Porta 5432)** ou **Direct Connection (Porta 5432 com IPv6)**.
-2. **NUNCA** execute migrations apontando para a porta `6543` (Transaction Pooler).
-
-### 7.2 Passo a Passo de Execução
 ```bash
-# 1. Simular o plano de execução sem aplicar modificações
+# 1. Simular plano de migrações sem aplicar alterações físicas
 python backend/manage.py migrate --plan
 
-# 2. Executar a migração da baseline consolidada
+# 2. Aplicar migrações da baseline
 python backend/manage.py migrate
 
-# 3. Validar a aplicação das migrações
+# 3. Validar aplicação
 python backend/manage.py showmigrations
 
-# 4. Executar novamente a inspeção estrutural para comprovar conformidade
+# 4. Re-executar pré-voo de schema para comprovar ALREADY_PROVISIONED
 python backend/scripts/preflight_schema_inspection.py
 ```
 
 ---
 
-## 8. Estratégia de Rollback, Contingência e Desastre
+## 8. Estratégia Realista de Rollback, Contingência e Desastre (Supabase Free)
 
 > [!CAUTION]
-> **NUNCA EXECUTE `python manage.py migrate accounts zero` EM PRODUÇÃO.**
-> O script reverso da migration baseline `accounts.0001_initial` executa o desfazimento físico com `DROP TABLE` em todas as 36 tabelas de aplicação e views. A execução deste comando em produção causaria **perda total irreversível de todos os dados do sistema**.
+> **PROIBIÇÃO ABSOLUTA DE `migrate accounts zero` EM PRODUÇÃO:**  
+> O script reverso da migration baseline `accounts.0001_initial` executa `DROP TABLE` em todas as 36 tabelas de aplicação e views com perda total e definitiva de dados. Este comando é terminantemente proibido fora de ambientes de teste temporários locais.
 
-### 8.1 Política de Rollback em Produção
+### 8.1 Limitações Reais do Plano Supabase Free
+- **Sem Point-in-Time Recovery (PITR):** O recurso PITR não existe no plano Free (exclusivo para planos pagos/Pro).
+- **Sem Restauração de Snapshot Point-and-Click:** O plano gratuito não oferece restauração automática diária com reversão de estado pelo painel com um clique.
 
-1. **Restauração de Snapshot / Point-in-Time Recovery (PITR):**
-   - O Supabase realiza backups diários automatizados e suporte a PITR (conforme plano).
-   - Em caso de falha catastrófica ou corrupção estrutural, a restauração deve ser realizada a partir do snapshot oficial mais recente via dashboard do Supabase (**Project Settings > Database > Backups**).
-2. **Migrações Aditivas ("Forward Migrations"):**
-   - Se uma nova migration introduzir um comportamento indesejado, a correção arquitetural consiste em criar uma nova migration aditiva (`0002_fix_...`), testada localmente, que ajuste os campos de forma retrocompatível.
-3. **Plano de Contingência Operacional (Fallback para In-Memory):**
-   - Caso o banco de dados remoto fique temporariamente indisponível por indisponibilidade regional da AWS ou problema de rede, a aplicação Django pode ser reiniciada emergencialmente com `REPOSITORY_BACKEND=memory`, permitindo a navegação consultiva e respostas simuladas enquanto o serviço de banco é restabelecido.
+### 8.2 Plano Oficial de Backup e Restauração Lógica Manual
+Para suprir as limitações do plano Free, adote o procedimento de backup lógico via ferramentas nativas do PostgreSQL (`pg_dump` e `pg_restore`):
+
+1. **Geração de Backup Lógico Pré-Deploy / Pré-Migração:**
+   ```bash
+   # Executado a partir de ambiente seguro autorizado com pg_dump instalado
+   pg_dump \
+     -h aws-1-sa-east-1.pooler.supabase.com \
+     -p 5432 \
+     -U "postgres.<project-ref>" \
+     -d postgres \
+     -F c \
+     -b \
+     -v \
+     -f "./backups/sosp_pre_migration_$(date +%Y%m%d_%H%M%S).dump"
+   ```
+2. **Armazenamento Seguro do Dump:**
+   - Os arquivos de dump devem ser imediatamente transferidos para armazenamento frio criptografado (ex.: bucket privado S3 com criptografia SSE-KMS e retenção versionada).
+   - **NUNCA armazene dumps no Git ou em servidores web públicos.**
+3. **Procedimento Testado de Restauração em Caso de Desastre (`pg_restore`):**
+   ```bash
+   # Restauração controlada do dump binário estrutural
+   pg_restore \
+     -h aws-1-sa-east-1.pooler.supabase.com \
+     -p 5432 \
+     -U "postgres.<project-ref>" \
+     -d postgres \
+     --clean \
+     --if-exists \
+     -v \
+     "./backups/sosp_pre_migration_YYYYMMDD_HHMMSS.dump"
+   ```
+4. **Política de "Forward Migrations":**
+   - Correções estruturais devem ser implementadas como novas migrations aditivas e compatíveis para frente (`0002_fix_...`), nunca via rollback destrutivo.
+5. **Fallback de Emergência para In-Memory:**
+   - Em caso de indisponibilidade severa do banco remoto, reinicie o backend com `REPOSITORY_BACKEND=memory` para manter a navegação consultiva de serviços operando.
+
+> [!NOTE]
+> **NÃO execute backup remoto nem restauração nesta etapa.** Este plano detalha a governança técnica a ser acionada em janelas operacionais autorizadas.
 
 ---
 
-## 9. Checklist de Aprovação para Conexão Remota
+## 9. Checklist de Aprovação para o Primeiro Pré-Voo Remoto Somente Leitura
 
-Antes de iniciar a etapa remota no Supabase:
+Antes de executar o primeiro pré-voo remoto:
 
-- [ ] Credenciais obtidas no Dashboard do Supabase para o Session Pooler (porta 5432).
-- [ ] Variáveis de ambiente configuradas no arquivo local `.env` (ignorado pelo Git).
-- [ ] Execução bem-sucedida de `preflight_connectivity.py` retornando código 0.
-- [ ] Execução de `preflight_schema_inspection.py` diagnosticando `READY_FOR_BASELINE`.
-- [ ] Aprovação humana explícita do Tech Lead / CODEOWNER (`@euoluizg`) para execução da migration remota.
+- [ ] Host confirmado como `aws-1-sa-east-1.pooler.supabase.com` (Porta 5432).
+- [ ] Credenciais obtidas no painel do Supabase e exportadas na sessão local do shell (`DB_PASSWORD`).
+- [ ] `DB_ENGINE=postgresql` e `REPOSITORY_BACKEND=memory` configurados.
+- [ ] Execução de `preflight_connectivity.py` retornando código `0`.
+- [ ] Execução de `preflight_schema_inspection.py` retornando código `0` (`READY_FOR_BASELINE`).
+- [ ] Aprovação formal do CODEOWNER (`@euoluizg`) para autorizar a aplicação remota de migrações em etapa subsequente.
