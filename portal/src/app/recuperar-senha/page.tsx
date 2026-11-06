@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { maskCPF } from "@/utils/masks";
 import { isValidCPF, validatePasswordStrength } from "@/utils/validations";
+import { recoverPassword, resetPassword } from "@/services/apiClient";
+import type { ProblemDetails } from "@/types/api";
 
 export default function PasswordRecoveryPage() {
   const router = useRouter();
@@ -31,7 +33,7 @@ export default function PasswordRecoveryPage() {
     return () => clearInterval(interval);
   }, [step]);
 
-  const handleCpfSubmit = (e: React.FormEvent) => {
+  const handleCpfSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValidCPF(cpf)) {
       setError("Informe um CPF válido para recuperar a senha.");
@@ -40,11 +42,16 @@ export default function PasswordRecoveryPage() {
     setError(null);
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await recoverPassword(cpf);
       setStep(2); // Avança para inserção do código
       setSecondsRemaining(15 * 60);
-    }, 800);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setError(problem?.detail || "Erro ao conectar ao servidor. Verifique sua conexão.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCodeSubmit = (e: React.FormEvent) => {
@@ -59,15 +66,10 @@ export default function PasswordRecoveryPage() {
       return;
     }
     setError(null);
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      setStep(3); // Avança para nova senha
-    }, 600);
+    setStep(3); // Avança para nova senha
   };
 
-  const handlePasswordReset = (e: React.FormEvent) => {
+  const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     const strength = validatePasswordStrength(newPassword);
     if (!strength.isValid) {
@@ -81,10 +83,15 @@ export default function PasswordRecoveryPage() {
     setError(null);
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await resetPassword(cpf, code, newPassword);
       setStep(4); // Sucesso
-    }, 800);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setError(problem?.detail || "Código inválido ou erro ao redefinir a senha.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const formatTimer = () => {

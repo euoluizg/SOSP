@@ -20,12 +20,14 @@ function ServicesContent() {
   const initialCategory = searchParams.get("categoria") || "";
   const initialAgency = searchParams.get("orgao") || "";
   const initialChannel = searchParams.get("canal") || "";
+  const initialMunicipality = searchParams.get("municipio") || "";
   const initialPage = parseInt(searchParams.get("pagina") || "1", 10);
 
   const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState(initialCategory);
   const [agencyId, setAgencyId] = useState(initialAgency);
   const [channel, setChannel] = useState(initialChannel);
+  const [municipality, setMunicipality] = useState(initialMunicipality);
   const [currentPage, setCurrentPage] = useState(initialPage);
 
   const [services, setServices] = useState<Service[]>([]);
@@ -84,10 +86,18 @@ function ServicesContent() {
       if (agencyId && svc.agencyId !== agencyId) return false;
       // 4. Filtro de Canal (online, inPerson, hybrid)
       if (channel && svc.channel !== channel) return false;
+      // 5. Filtro de Município (RN-04 / D3)
+      if (municipality) {
+        const isCapitalOrRegional =
+          municipality.toLowerCase() === "maceió" || municipality.toLowerCase() === "arapiraca";
+        if (svc.channel === "inPerson" && !isCapitalOrRegional) {
+          return false;
+        }
+      }
 
       return true;
     });
-  }, [services, query, category, agencyId, channel]);
+  }, [services, query, category, agencyId, channel, municipality]);
 
   // Paginação estrita de 10 itens por página (RN-05)
   const pageSize = 10;
@@ -105,6 +115,7 @@ function ServicesContent() {
       categoria: category,
       orgao: agencyId,
       canal: channel,
+      municipio: municipality,
       pagina: 1,
     });
   };
@@ -114,11 +125,12 @@ function ServicesContent() {
     setCategory("");
     setAgencyId("");
     setChannel("");
+    setMunicipality("");
     setCurrentPage(1);
     router.push("/servicos");
   };
 
-  const hasActiveFilters = Boolean(query || category || agencyId || channel);
+  const hasActiveFilters = Boolean(query || category || agencyId || channel || municipality);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -157,8 +169,8 @@ function ServicesContent() {
               <Search className="w-5 h-5 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             </div>
 
-            {/* Os 4 Filtros Combináveis (RN-04) */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            {/* Os 4 Filtros Combináveis (RN-04 / D3) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
               {/* Filtro 1: Categoria */}
               <Select
                 label="Categoria"
@@ -213,6 +225,28 @@ function ServicesContent() {
                   { value: "online", label: "Online (100% digital)" },
                   { value: "inPerson", label: "Presencial (com agendamento)" },
                   { value: "hybrid", label: "Híbrido (digital e presencial)" },
+                ]}
+              />
+
+              {/* Filtro 4: Município (RN-04 / D3) */}
+              <Select
+                label="Município"
+                id="filter-municipality"
+                value={municipality}
+                onChange={(e) => {
+                  setMunicipality(e.target.value);
+                  setCurrentPage(1);
+                  updateUrlFilters({ municipio: e.target.value, pagina: 1 });
+                }}
+                options={[
+                  { value: "", label: "Todos os municípios" },
+                  { value: "Maceió", label: "Maceió" },
+                  { value: "Arapiraca", label: "Arapiraca" },
+                  { value: "Rio Largo", label: "Rio Largo" },
+                  { value: "Palmeira dos Índios", label: "Palmeira dos Índios" },
+                  { value: "Penedo", label: "Penedo" },
+                  { value: "União dos Palmares", label: "União dos Palmares" },
+                  { value: "Delmiro Gouveia", label: "Delmiro Gouveia" },
                 ]}
               />
             </div>

@@ -28,7 +28,12 @@ def test_create_appointment_and_protocol_format():
         "scheduledTime": "10:30",
         "citizenId": "citizen-002",
     }
-    response = client.post("/api/v1/appointments/", payload, format="json")
+    # Sem Idempotency-Key deve falhar com 400 (ADR-005)
+    resp_no_key = client.post("/api/v1/appointments/", payload, format="json")
+    assert resp_no_key.status_code == 400
+
+    # Com Idempotency-Key deve criar com sucesso
+    response = client.post("/api/v1/appointments/", payload, format="json", HTTP_IDEMPOTENCY_KEY="idemp-key-test-001")
     assert response.status_code == 201
     data = response.json()
     assert "protocolNumber" in data

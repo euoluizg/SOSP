@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/Input";
 import { GovbrModal } from "@/components/features/auth/GovbrModal";
 import { maskCPF } from "@/utils/masks";
 import { isValidCPF } from "@/utils/validations";
+import { loginCitizen } from "@/services/apiClient";
+import type { ProblemDetails } from "@/types/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -39,7 +41,7 @@ export default function LoginPage() {
     if (formError) setFormError(null);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lockoutSeconds > 0) return;
 
@@ -59,37 +61,38 @@ export default function LoginPage() {
     setIsSubmitting(true);
     setFormError(null);
 
-    // Simulação com validação de credenciais de teste
-    setTimeout(() => {
-      setIsSubmitting(false);
-
-      // No protótipo/MVP, aceitamos qualquer senha maior que 5 caracteres,
-      // exceto se for "erro" para fins de teste da regra RN-29.
-      if (password === "erro") {
-        const nextAttempts = failedAttempts + 1;
-        setFailedAttempts(nextAttempts);
-
-        if (nextAttempts >= 5) {
-          setLockoutSeconds(300); // 5 minutos (RN-29)
-          setFormError(
-            "Conta bloqueada temporariamente por 5 minutos após 5 tentativas incorretas (Regra RN-29)."
-          );
-        } else {
-          setFormError(
-            `Senha incorreta. Tentativa ${nextAttempts} de 5 antes do bloqueio temporário.`
-          );
-        }
-        return;
-      }
-
-      // Sucesso no Login
+    try {
+      const res = await loginCitizen(cpf, password);
       setFailedAttempts(0);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sosp_auth_token", res.token);
+        localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
+      }
       if (profile === "server") {
         router.push("/servidor/painel");
       } else {
         router.push("/cidadao/meus-agendamentos");
       }
-    }, 800);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      if (problem?.status === 429) {
+        setLockoutSeconds(300);
+        setFormError(problem.detail || "Conta temporariamente bloqueada por 5 minutos após 5 tentativas incorretas (Regra RN-29).");
+      } else if (problem?.status === 401) {
+        const nextAttempts = failedAttempts + 1;
+        setFailedAttempts(nextAttempts);
+        if (nextAttempts >= 5) {
+          setLockoutSeconds(300);
+          setFormError("Conta bloqueada temporariamente por 5 minutos após 5 tentativas incorretas (Regra RN-29).");
+        } else {
+          setFormError(`CPF ou senha incorretos. Tentativa ${nextAttempts} de 5 antes do bloqueio temporário.`);
+        }
+      } else {
+        setFormError(problem?.detail || "Não foi possível conectar ao servidor. Verifique se o backend está em execução.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatLockoutTime = () => {
