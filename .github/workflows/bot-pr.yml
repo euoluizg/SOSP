@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch de origem (head branch)"
+        description: "Branch de trabalho já enviada ao remoto (head branch)"
         required: true
         type: string
       title:
-        description: "Título do Pull Request"
+        description: "Título oficial do Pull Request"
         required: true
         type: string
       body:
-        description: "Descrição do Pull Request"
+        description: "Descrição detalhada do Pull Request"
         required: false
         type: string
         default: ""
@@ -33,40 +33,57 @@ jobs:
           app-id: ${{ vars.SOSP_BOT_APP_ID }}
           private-key: ${{ secrets.SOSP_BOT_PRIVATE_KEY }}
 
+      - name: "Validar e Sanitizar Entradas"
+        env:
+          INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_TITLE: ${{ inputs.title }}
+        run: |
+          # 1. Validação estrita de formato de branch (sem injeção de comandos ou flags)
+          if ! [[ "$INPUT_BRANCH" =~ ^[a-zA-Z0-9_\-\.\/]+$ ]] || [[ "$INPUT_BRANCH" =~ \.\. ]] || [[ "$INPUT_BRANCH" =~ ^- ]]; then
+            echo "::error::Nome de branch inválido ou inseguro: '$INPUT_BRANCH'"
+            exit 1
+          fi
+
+          # 2. Validação do título do PR (não vazio, máximo de 256 caracteres)
+          TRIMMED_TITLE=$(echo "$INPUT_TITLE" | tr -d '[:space:]')
+          if [ -z "$TRIMMED_TITLE" ] || [ ${#INPUT_TITLE} -gt 256 ]; then
+            echo "::error::Título do PR é inválido (vazio ou maior que 256 caracteres)."
+            exit 1
+          fi
+
+          echo "Parâmetros 'branch' e 'title' validados com sucesso."
+
       - name: "Checkout do Repositório"
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: "Assegurar Autoria do Último Push pelo Bot"
-        run: |
-          git config user.name "sosp-agents-bot[bot]"
-          git config user.email "sosp-agents-bot[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore(ci): assinatura de envio pelo sosp-agents-bot" || true
-          git push origin "${{ inputs.branch }}"
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-
-      - name: "Criar Pull Request Oficial pelo Bot"
+      - name: "Criar ou Atualizar Pull Request via GitHub App"
         id: create-pr
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_BRANCH: ${{ inputs.branch }}
+          INPUT_TITLE: ${{ inputs.title }}
+          INPUT_BODY: ${{ inputs.body }}
         run: |
-          # Verifica se já existe PR aberto para esta branch
-          EXISTING_PR=$(gh pr list --repo "${{ github.repository }}" --head "${{ inputs.branch }}" --base develop --json number --jq '.[0].number')
+          # Verifica de forma segura se já existe PR aberto para esta branch
+          EXISTING_PR=$(gh pr list --repo "$GH_REPO" --head "$INPUT_BRANCH" --base develop --json number --jq '.[0].number')
+          
           if [ -n "$EXISTING_PR" ]; then
-            echo "PR #$EXISTING_PR já existe para a branch ${{ inputs.branch }}."
-            gh pr edit "$EXISTING_PR" --repo "${{ github.repository }}" --title "${{ inputs.title }}" --body "${{ inputs.body }}"
-            echo "pr_url=https://github.com/${{ github.repository }}/pull/$EXISTING_PR" >> "$GITHUB_OUTPUT"
+            echo "PR #$EXISTING_PR já existe para a branch '$INPUT_BRANCH'. Atualizando metadados..."
+            gh pr edit "$EXISTING_PR" --repo "$GH_REPO" --title "$INPUT_TITLE" --body "$INPUT_BODY"
+            echo "pr_url=https://github.com/$GH_REPO/pull/$EXISTING_PR" >> "$GITHUB_OUTPUT"
           else
+            echo "Criando novo Pull Request autenticado pelo GitHub App..."
             PR_URL=$(gh pr create \
-              --repo "${{ github.repository }}" \
+              --repo "$GH_REPO" \
               --base develop \
-              --head "${{ inputs.branch }}" \
-              --title "${{ inputs.title }}" \
-              --body "${{ inputs.body }}" \
+              --head "$INPUT_BRANCH" \
+              --title "$INPUT_TITLE" \
+              --body "$INPUT_BODY" \
               --reviewer "euoluizg")
             echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-            echo "Pull Request criado com sucesso: $PR_URL"
+            echo "Pull Request criado com sucesso pelo GitHub App: $PR_URL"
           fi

@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - develop
-      - master
   push:
     branches:
       - develop
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -94,7 +96,8 @@ jobs:
         run: |
           pip install -r backend/requirements.txt
 
-      - name: "Executar Verificações de Integração HTTP e Contratos"
+      - name: "Executar Verificações de Integração de API e Contratos HTTP (DRF)"
+        # Executa testes de integração HTTP entre endpoints REST (DRF), contratos RFC 7807 e regras de negócio com backend simulado (não inclui testes E2E com navegador).
         run: |
           cd backend
           pytest -v common/ apps/scheduling/ apps/catalog/ apps/accounts/
@@ -117,30 +120,3 @@ jobs:
         run: |
           cd portal
           npm audit --audit-level=critical
-
-  bot-auth-gate:
-    name: "Bot Authentication Gate"
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Gerar Token do GitHub App (sosp-agents-bot)"
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.SOSP_BOT_APP_ID }}
-          private-key: ${{ secrets.SOSP_BOT_PRIVATE_KEY }}
-
-      - name: "Verificar Acesso e Permissões do GitHub App"
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          REPO_NAME=$(gh api /installation/repositories --jq '.repositories[0].full_name')
-          echo "Token do GitHub App gerado com sucesso! Acesso concedido ao repositório: $REPO_NAME"
-          # Validação de leitura de Pull Requests conforme contexto de execução
-          if [ -n "${{ github.event.pull_request.number }}" ]; then
-            echo "Contexto de Pull Request detectado (PR #${{ github.event.pull_request.number }})."
-            gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json number,title,state
-          else
-            echo "Contexto de push/workflow_dispatch detectado. Listando PRs abertos..."
-            gh pr list --repo ${{ github.repository }} --limit 1
-          fi
