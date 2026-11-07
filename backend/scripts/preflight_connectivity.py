@@ -10,7 +10,9 @@ Regras de Segurança:
 - Não executa comandos DDL ou DML (somente 'SELECT version()').
 - Não imprime senhas, tokens ou connection strings sensíveis no terminal/logs.
 - Sanitiza mensagens de erro de conexão.
-- Lê senha preferencialmente de variáveis de ambiente (DB_PASSWORD / PGPASSWORD) ou getpass.
+- Exige sslmode='require', 'verify-ca' ou 'verify-full' para hosts remotos (sem fallback para prefer/disable).
+- Preserva compatibilidade com bancos PostgreSQL locais (sslmode prefer/disable aceitos em localhost/socket).
+- Lê credenciais exclusivamente de variáveis de ambiente ou getpass interativo (passagem de senha por flag de linha de comando desabilitada).
 - Retorna código de saída 0 (sucesso) ou 1 (falha).
 """
 
@@ -21,6 +23,9 @@ import argparse
 import getpass
 from typing import Dict, Any
 
+VALID_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+RESTRICTIVE_REMOTE_SSLMODES = ("require", "verify-ca", "verify-full")
+
 
 def mask_string(val: str, show_chars: int = 4) -> str:
     """Mascara strings sensíveis preservando prefixo identificador."""
@@ -29,6 +34,29 @@ def mask_string(val: str, show_chars: int = 4) -> str:
     if len(val) <= show_chars * 2:
         return "***"
     return f"{val[:show_chars]}...{val[-show_chars:]}"
+
+
+def validate_sslmode(sslmode: str, host: str) -> str:
+    """
+    Valida e normaliza o sslmode garantindo segurança de transporte.
+    Para hosts remotos, exige 'require', 'verify-ca' ou 'verify-full'.
+    Proíbe 'disable', 'allow' ou 'prefer' em conexões remotas.
+    Preserva compatibilidade com bancos locais (localhost, socket Unix).
+    """
+    normalized = sslmode.strip().lower()
+    if normalized not in VALID_SSLMODES:
+        raise ValueError(
+            f"sslmode inválido: '{sslmode}'. Valores válidos: {', '.join(VALID_SSLMODES)}."
+        )
+
+    is_remote = host not in ("localhost", "127.0.0.1", "") and not host.startswith("/")
+    if is_remote and normalized not in RESTRICTIVE_REMOTE_SSLMODES:
+        raise ValueError(
+            f"Conexão remota rejeitada por governança de segurança: sslmode='{sslmode}' é proibido para o host remoto '{mask_string(host)}'. "
+            f"Para conexões remotas (como Supabase), sslmode deve ser 'require', 'verify-ca' ou 'verify-full'. "
+            "Fallback para SSL desabilitado ou prefer é terminantemente proibido."
+        )
+    return normalized
 
 
 def test_tcp_port(host: str, port: int, timeout_sec: int = 5) -> bool:
@@ -123,10 +151,12 @@ def test_postgresql_handshake(
         return False
 
 
-def resolve_password(cli_password: str = "", host: str = "localhost") -> str:
-    """Resolve a senha de forma segura: CLI -> DB_PASSWORD -> PGPASSWORD -> getpass."""
-    if cli_password:
-        return cli_password
+def resolve_password(host: str = "localhost") -> str:
+    """
+    Resolve a senha de forma segura exclusivamente via variáveis de ambiente
+    (DB_PASSWORD / PGPASSWORD) ou entrada interativa oculta via getpass.
+    A passagem de senhas via linha de comando (CLI) foi removida por segurança.
+    """
     env_pwd = os.environ.get("DB_PASSWORD") or os.environ.get("PGPASSWORD")
     if env_pwd:
         return env_pwd
@@ -152,13 +182,25 @@ def main():
     parser.add_argument("--port", type=int, default=int(os.environ.get("DB_PORT", "5432")), help="Porta do banco")
     parser.add_argument("--dbname", default=os.environ.get("DB_NAME", "postgres"), help="Nome da base")
     parser.add_argument("--user", default=os.environ.get("DB_USER", "postgres"), help="Usuário")
-    parser.add_argument("--password", default="", help="(Opcional) Senha. Se omitido, lê de DB_PASSWORD/PGPASSWORD ou solicita via getpass.")
-    parser.add_argument("--sslmode", default=os.environ.get("DB_SSLMODE", "prefer"), help="Modo SSL")
+    parser.add_argument(
+        "--sslmode",
+        default="",
+        help="Modo SSL ('require', 'verify-ca', 'verify-full' para remoto; padrão 'require' em remoto, 'prefer' em local)",
+    )
     parser.add_argument("--timeout", type=int, default=8, help="Timeout em segundos")
 
     args = parser.parse_args()
 
-    password = resolve_password(args.password, args.host)
+    # Validação e aplicação de regras de SSL para hosts remotos
+    is_remote = args.host not in ("localhost", "127.0.0.1", "") and not args.host.startswith("/")
+    raw_sslmode = args.sslmode or os.environ.get("DB_SSLMODE") or ("require" if is_remote else "prefer")
+    try:
+        sslmode = validate_sslmode(raw_sslmode, args.host)
+    except ValueError as e:
+        print(f"\n❌ ERRO DE GOVERNANÇA DE SEGURANÇA SSL:\n   {e}\n")
+        sys.exit(1)
+
+    password = resolve_password(args.host)
 
     print("=" * 70)
     print("SOSP — Pré-Voo de Conectividade com Banco de Dados")
@@ -167,7 +209,7 @@ def main():
     print(f"Porta:    {args.port}")
     print(f"Base:     {args.dbname}")
     print(f"Usuário:  {mask_string(args.user)}")
-    print(f"SSL Mode: {args.sslmode}")
+    print(f"SSL Mode: {sslmode}")
     print("-" * 70)
 
     # 1. Teste de Socket / Rede
@@ -182,7 +224,7 @@ def main():
         args.dbname,
         args.user,
         password,
-        args.sslmode,
+        sslmode,
         timeout_sec=args.timeout,
     ):
         print("\n❌ PRÉ-VOO REPROVADO NO HANDSHAKE POSTGRESQL.")
