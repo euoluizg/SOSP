@@ -297,6 +297,31 @@ def evaluate_schema_state(
     )
 
 
+def enter_verified_readonly_transaction(cur) -> str:
+    """
+    Inicia explicitamente uma transação 'BEGIN READ ONLY' e verifica que
+    'SHOW transaction_read_only' retorna 'on' dentro da transação efetiva.
+    Não depende de parâmetros de inicialização (options) que poolers possam ignorar.
+    """
+    cur.execute("BEGIN READ ONLY;")
+    cur.execute("SHOW transaction_read_only;")
+    row = cur.fetchone()
+    tx_ro = row[0] if row else None
+    if tx_ro != "on":
+        raise RuntimeError(
+            f"Violação de segurança transacional: esperado transaction_read_only='on', obtido '{tx_ro}'."
+        )
+    return tx_ro
+
+
+def safe_rollback(cur) -> None:
+    """Encerra a transação explicitamente com ROLLBACK, ignorando erros de conexão já fechada."""
+    try:
+        cur.execute("ROLLBACK;")
+    except Exception:
+        pass
+
+
 def inspect_database(conn_info: Dict[str, Any]) -> int:
     try:
         import psycopg
@@ -304,158 +329,165 @@ def inspect_database(conn_info: Dict[str, Any]) -> int:
         print("✗ Erro: Biblioteca 'psycopg' não encontrada. Instale via requirements.txt.")
         return 1
 
-    # Força transação em modo estritamente somente-leitura na conexão
-    conn_info["options"] = "-c default_transaction_read_only=on"
+    # Remove dependência de startup options (ignoradas por poolers como Supavisor)
+    clean_conn_info = {k: v for k, v in conn_info.items() if k != "options"}
 
     try:
-        with psycopg.connect(**conn_info) as conn:
+        with psycopg.connect(**clean_conn_info, autocommit=True) as conn:
             with conn.cursor() as cur:
-                print("✓ Conexão estabelecida em modo SOMENTE LEITURA (default_transaction_read_only=on).\n")
+                try:
+                    tx_ro = enter_verified_readonly_transaction(cur)
+                    print(
+                        f"✓ Conexão estabelecida e verificada em modo SOMENTE LEITURA "
+                        f"(BEGIN READ ONLY / transaction_read_only={tx_ro}).\n"
+                    )
 
-                # 1. Informações da Instância e Sessão
-                cur.execute("SELECT current_database(), current_user, session_user, version(), current_setting('server_version_num');")
-                db_name, cur_user, sess_user, version_str, ver_num_str = cur.fetchone()
-                pg_version_num = int(ver_num_str)
+                    # 1. Informações da Instância e Sessão
+                    cur.execute("SELECT current_database(), current_user, session_user, version(), current_setting('server_version_num');")
+                    db_name, cur_user, sess_user, version_str, ver_num_str = cur.fetchone()
+                    pg_version_num = int(ver_num_str)
 
-                print("1. AMBIENTE E SESSÃO ATIVA")
-                print(f"   - Banco:    {db_name}")
-                print(f"   - Usuário:  {cur_user} (Session: {sess_user})")
-                print(f"   - Versão:   {version_str.split(',')[0]} (num: {pg_version_num})")
+                    print("1. AMBIENTE E SESSÃO ATIVA")
+                    print(f"   - Banco:    {db_name}")
+                    print(f"   - Usuário:  {cur_user} (Session: {sess_user})")
+                    print(f"   - Versão:   {version_str.split(',')[0]} (num: {pg_version_num})")
 
-                # 2. Privilégios do Usuário Conectado
-                print("\n2. PRIVILÉGIOS DA ROLE ATIVA")
-                cur.execute(
-                    """
-                    SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin, rolinherit
-                    FROM pg_roles WHERE rolname = current_user;
-                    """
-                )
-                role_info = cur.fetchone()
-                if role_info:
-                    print(f"   - Superusuário:  {'SIM' if role_info[1] else 'Não'}")
-                    print(f"   - Pode criar BD: {'SIM' if role_info[3] else 'Não'}")
-                    print(f"   - Pode logar:    {'SIM' if role_info[4] else 'Não'}")
-                cur.execute("SELECT has_schema_privilege(current_user, 'public', 'CREATE');")
-                can_create_in_public = cur.fetchone()[0]
-                print(f"   - Permissão CREATE no schema 'public': {'SIM (Pode rodar migrations)' if can_create_in_public else 'NÃO (Sem permissão DDL)'}")
+                    # 2. Privilégios do Usuário Conectado
+                    print("\n2. PRIVILÉGIOS DA ROLE ATIVA")
+                    cur.execute(
+                        """
+                        SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin, rolinherit
+                        FROM pg_roles WHERE rolname = current_user;
+                        """
+                    )
+                    role_info = cur.fetchone()
+                    if role_info:
+                        print(f"   - Superusuário:  {'SIM' if role_info[1] else 'Não'}")
+                        print(f"   - Pode criar BD: {'SIM' if role_info[3] else 'Não'}")
+                        print(f"   - Pode logar:    {'SIM' if role_info[4] else 'Não'}")
+                    cur.execute("SELECT has_schema_privilege(current_user, 'public', 'CREATE');")
+                    can_create_in_public = cur.fetchone()[0]
+                    print(f"   - Permissão CREATE no schema 'public': {'SIM (Pode rodar migrations)' if can_create_in_public else 'NÃO (Sem permissão DDL)'}")
 
-                # 3. Extensões Instaladas e Disponíveis
-                print("\n3. EXTENSÕES POSTGRESQL")
-                cur.execute("SELECT extname, extversion FROM pg_extension ORDER BY extname;")
-                installed_extensions = dict(cur.fetchall())
-                for ext, ver in installed_extensions.items():
-                    print(f"   - Instalada:  {ext:<15} (versão {ver})")
+                    # 3. Extensões Instaladas e Disponíveis
+                    print("\n3. EXTENSÕES POSTGRESQL")
+                    cur.execute("SELECT extname, extversion FROM pg_extension ORDER BY extname;")
+                    installed_extensions = dict(cur.fetchall())
+                    for ext, ver in installed_extensions.items():
+                        print(f"   - Instalada:  {ext:<15} (versão {ver})")
 
-                cur.execute("SELECT name FROM pg_available_extensions WHERE name IN ('unaccent', 'pg_trgm');")
-                available_extensions = set(r[0] for r in cur.fetchall())
-                for ext in ("unaccent", "pg_trgm"):
-                    if ext in installed_extensions:
-                        print(f"   ✓ Extensão '{ext}' está ativa.")
-                    elif ext in available_extensions:
-                        print(f"   ℹ️  Extensão '{ext}' disponível para instalação via migration.")
+                    cur.execute("SELECT name FROM pg_available_extensions WHERE name IN ('unaccent', 'pg_trgm');")
+                    available_extensions = set(r[0] for r in cur.fetchall())
+                    for ext in ("unaccent", "pg_trgm"):
+                        if ext in installed_extensions:
+                            print(f"   ✓ Extensão '{ext}' está ativa.")
+                        elif ext in available_extensions:
+                            print(f"   ℹ️  Extensão '{ext}' disponível para instalação via migration.")
+                        else:
+                            print(f"   ✗ Extensão '{ext}' NÃO encontrada no catálogo de extensões!")
+
+                    # 4. Tabelas Existentes no Schema 'public'
+                    print("\n4. TABELAS NO SCHEMA 'public'")
+                    cur.execute(
+                        """
+                        SELECT tablename
+                        FROM pg_tables
+                        WHERE schemaname = 'public'
+                        ORDER BY tablename;
+                        """
+                    )
+                    existing_tables = [r[0].lower() for r in cur.fetchall()]
+                    print(f"   - Total de tabelas encontradas em 'public': {len(existing_tables)}")
+
+                    sosp_present = set(existing_tables).intersection(SOSP_EXPECTED_TABLES)
+                    django_present = set(existing_tables).intersection(DJANGO_CORE_TABLES)
+                    unknown_tables = set(existing_tables) - (SOSP_EXPECTED_TABLES | DJANGO_CORE_TABLES)
+
+                    print(f"   - Tabelas de domínio SOSP presentes: {len(sosp_present)} de {len(SOSP_EXPECTED_TABLES)}")
+                    print(f"   - Tabelas técnicas Django presentes: {len(django_present)} de {len(DJANGO_CORE_TABLES)}")
+                    if unknown_tables:
+                        print(f"   ⚠️  Tabelas desconhecidas encontradas: {len(unknown_tables)}")
+
+                    # 5. Views Existentes no Schema 'public'
+                    print("\n5. VIEWS NO SCHEMA 'public'")
+                    cur.execute(
+                        """
+                        SELECT viewname
+                        FROM pg_views
+                        WHERE schemaname = 'public'
+                        ORDER BY viewname;
+                        """
+                    )
+                    existing_views = [r[0].lower() for r in cur.fetchall()]
+                    for v in existing_views:
+                        status_view = "✓ SOSP" if v in SOSP_EXPECTED_VIEWS else "⚠️  Desconhecida"
+                        print(f"   - View: {v:<35} [{status_view}]")
+
+                    # 6. Histórico de Migrations do Django
+                    print("\n6. HISTÓRICO DE MIGRATIONS (django_migrations)")
+                    applied_migrations: List[Tuple[str, str]] = []
+                    if "django_migrations" in existing_tables:
+                        cur.execute("SELECT app, name, applied FROM django_migrations ORDER BY applied;")
+                        rows = cur.fetchall()
+                        applied_migrations = [(r[0], r[1]) for r in rows]
+                        print(f"   - Total de migrations aplicadas: {len(applied_migrations)}")
+                        for app, name, applied in rows:
+                            print(f"     * {app:<15} {name:<30} ({applied.strftime('%Y-%m-%d %H:%M:%S')})")
                     else:
-                        print(f"   ✗ Extensão '{ext}' NÃO encontrada no catálogo de extensões!")
+                        print("   - Tabela 'django_migrations' não existe no banco (Banco inicial limpo).")
 
-                # 4. Tabelas Existentes no Schema 'public'
-                print("\n4. TABELAS NO SCHEMA 'public'")
-                cur.execute(
-                    """
-                    SELECT tablename
-                    FROM pg_tables
-                    WHERE schemaname = 'public'
-                    ORDER BY tablename;
-                    """
-                )
-                existing_tables = [r[0].lower() for r in cur.fetchall()]
-                print(f"   - Total de tabelas encontradas em 'public': {len(existing_tables)}")
+                    # 7. Diagnóstico de RLS (Row Level Security)
+                    print("\n7. STATUS DE RLS NAS TABELAS DO SCHEMA 'public'")
+                    cur.execute(
+                        """
+                        SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+                        FROM pg_class c
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = 'public' AND c.relkind = 'r'
+                        ORDER BY c.relname;
+                        """
+                    )
+                    rls_rows = cur.fetchall()
+                    tables_with_rls = [r[0] for r in rls_rows if r[1]]
+                    print(f"   - Tabelas com RLS habilitado: {len(tables_with_rls)} de {len(rls_rows)}")
 
-                sosp_present = set(existing_tables).intersection(SOSP_EXPECTED_TABLES)
-                django_present = set(existing_tables).intersection(DJANGO_CORE_TABLES)
-                unknown_tables = set(existing_tables) - (SOSP_EXPECTED_TABLES | DJANGO_CORE_TABLES)
+                    # 8. SÍNTESE DO ESTADO DIAGNÓSTICO
+                    print("\n" + "=" * 70)
+                    print("SÍNTESE DIAGNÓSTICA PARA EXECUÇÃO FUTURA DE MIGRATIONS")
+                    print("=" * 70)
 
-                print(f"   - Tabelas de domínio SOSP presentes: {len(sosp_present)} de {len(SOSP_EXPECTED_TABLES)}")
-                print(f"   - Tabelas técnicas Django presentes: {len(django_present)} de {len(DJANGO_CORE_TABLES)}")
-                if unknown_tables:
-                    print(f"   ⚠️  Tabelas desconhecidas encontradas: {len(unknown_tables)}")
+                    status, msg, exit_code, issues = evaluate_schema_state(
+                        existing_tables=existing_tables,
+                        existing_views=existing_views,
+                        applied_migrations=applied_migrations,
+                        can_create_in_public=can_create_in_public,
+                        installed_extensions=installed_extensions,
+                        available_extensions=available_extensions,
+                        pg_version_num=pg_version_num,
+                    )
 
-                # 5. Views Existentes no Schema 'public'
-                print("\n5. VIEWS NO SCHEMA 'public'")
-                cur.execute(
-                    """
-                    SELECT viewname
-                    FROM pg_views
-                    WHERE schemaname = 'public'
-                    ORDER BY viewname;
-                    """
-                )
-                existing_views = [r[0].lower() for r in cur.fetchall()]
-                for v in existing_views:
-                    status_view = "✓ SOSP" if v in SOSP_EXPECTED_VIEWS else "⚠️  Desconhecida"
-                    print(f"   - View: {v:<35} [{status_view}]")
+                    if status == "READY_FOR_BASELINE":
+                        print("🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE) [AVALIAÇÃO PRELIMINAR]")
+                        print("   [!] GOVERNANÇA: Este status é uma avaliação preliminar de não-conflito.")
+                        print("       NÃO constitui autorização automática para executar migrations.")
+                        print("       Contagens de objetos não comprovam sozinhas a integridade semântica completa.")
+                    elif status == "ALREADY_PROVISIONED":
+                        print("🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)")
+                    elif status == "PARTIAL_STATE":
+                        print("🟡 STATUS: ESTADO PARCIAL DETECTADO (PARTIAL_STATE)")
+                    else:
+                        print("⚠️ STATUS: REVISÃO MANUAL OBRIGATÓRIA (MANUAL_REVIEW_REQUIRED)")
 
-                # 6. Histórico de Migrations do Django
-                print("\n6. HISTÓRICO DE MIGRATIONS (django_migrations)")
-                applied_migrations: List[Tuple[str, str]] = []
-                if "django_migrations" in existing_tables:
-                    cur.execute("SELECT app, name, applied FROM django_migrations ORDER BY applied;")
-                    rows = cur.fetchall()
-                    applied_migrations = [(r[0], r[1]) for r in rows]
-                    print(f"   - Total de migrations aplicadas: {len(applied_migrations)}")
-                    for app, name, applied in rows:
-                        print(f"     * {app:<15} {name:<30} ({applied.strftime('%Y-%m-%d %H:%M:%S')})")
-                else:
-                    print("   - Tabela 'django_migrations' não existe no banco (Banco inicial limpo).")
+                    print(f"   Descrição: {msg}")
+                    if issues:
+                        print("   Pendências / Riscos identificados:")
+                        for issue in issues:
+                            print(f"     * {issue}")
 
-                # 7. Diagnóstico de RLS (Row Level Security)
-                print("\n7. STATUS DE RLS NAS TABELAS DO SCHEMA 'public'")
-                cur.execute(
-                    """
-                    SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
-                    FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE n.nspname = 'public' AND c.relkind = 'r'
-                    ORDER BY c.relname;
-                    """
-                )
-                rls_rows = cur.fetchall()
-                tables_with_rls = [r[0] for r in rls_rows if r[1]]
-                print(f"   - Tabelas com RLS habilitado: {len(tables_with_rls)} de {len(rls_rows)}")
-
-                # 8. SÍNTESE DO ESTADO DIAGNÓSTICO
-                print("\n" + "=" * 70)
-                print("SÍNTESE DIAGNÓSTICA PARA EXECUÇÃO FUTURA DE MIGRATIONS")
-                print("=" * 70)
-
-                status, msg, exit_code, issues = evaluate_schema_state(
-                    existing_tables=existing_tables,
-                    existing_views=existing_views,
-                    applied_migrations=applied_migrations,
-                    can_create_in_public=can_create_in_public,
-                    installed_extensions=installed_extensions,
-                    available_extensions=available_extensions,
-                    pg_version_num=pg_version_num,
-                )
-
-                if status == "READY_FOR_BASELINE":
-                    print("🟢 STATUS: PRONTO PARA IMPLANTAÇÃO INICIAL (READY_FOR_BASELINE) [AVALIAÇÃO PRELIMINAR]")
-                    print("   [!] GOVERNANÇA: Este status é uma avaliação preliminar de não-conflito.")
-                    print("       NÃO constitui autorização automática para executar migrations.")
-                    print("       Contagens de objetos não comprovam sozinhas a integridade semântica completa.")
-                elif status == "ALREADY_PROVISIONED":
-                    print("🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)")
-                elif status == "PARTIAL_STATE":
-                    print("🟡 STATUS: ESTADO PARCIAL DETECTADO (PARTIAL_STATE)")
-                else:
-                    print("⚠️ STATUS: REVISÃO MANUAL OBRIGATÓRIA (MANUAL_REVIEW_REQUIRED)")
-
-                print(f"   Descrição: {msg}")
-                if issues:
-                    print("   Pendências / Riscos identificados:")
-                    for issue in issues:
-                        print(f"     * {issue}")
-
-                print("=" * 70)
-                return exit_code
+                    print("=" * 70)
+                    return exit_code
+                finally:
+                    safe_rollback(cur)
 
     except psycopg.OperationalError as e:
         err_msg = str(e)
@@ -466,6 +498,82 @@ def inspect_database(conn_info: Dict[str, Any]) -> int:
     except Exception as e:
         print(f"✗ Erro inesperado: {type(e).__name__}: {e}")
         return 1
+
+
+def run_verified_readonly_migrate_plan(database: str = "default", require_ssl: bool = True) -> str:
+    """
+    Executa 'call_command("migrate", plan=True)' protegido por:
+    1. Conexão efetivamente PostgreSQL (sem fallback para SQLite).
+    2. Verificação de SSL ativo (quando require_ssl=True).
+    3. Bloco transaction.atomic(using=database) cuja primeira instrução SQL é
+       'SET TRANSACTION READ ONLY' seguida de 'SHOW transaction_read_only' == 'on'.
+    4. Bloqueio de abertura de qualquer conexão adicional não protegida ou de schema_editor().
+    5. Encerramento forçado da transação com ROLLBACK (transaction.set_rollback(True)).
+    """
+    from django.conf import settings
+    from django.core.management import call_command
+    from django.db import connections, transaction
+    from django.db.backends.signals import connection_created
+
+    db_cfg = settings.DATABASES[database]
+    if db_cfg.get("ENGINE") != "django.db.backends.postgresql":
+        raise RuntimeError(
+            f"Violação de governança: ENGINE esperado 'django.db.backends.postgresql', obtido '{db_cfg.get('ENGINE')}'."
+        )
+
+    conn = connections[database]
+    if conn.vendor != "postgresql":
+        raise RuntimeError(
+            f"Violação de governança: vendor esperado 'postgresql', obtido '{conn.vendor}'."
+        )
+
+    conn.ensure_connection()
+
+    if require_ssl:
+        pgconn = getattr(conn.connection, "pgconn", None)
+        ssl_active = bool(getattr(pgconn, "ssl_in_use", False))
+        if not ssl_active:
+            raise RuntimeError("Violação de segurança: conexão Django com PostgreSQL não está com SSL ativo!")
+
+    def _forbid_extra_connections(sender, connection, **kwargs):
+        raise RuntimeError(
+            f"Abertura de nova conexão não autorizada ('{connection.alias}') bloqueada durante migrate --plan!"
+        )
+
+    def _forbid_schema_editor(*args, **kwargs):
+        raise RuntimeError("Execução de DDL (schema_editor) terminantemente proibida durante migrate --plan!")
+
+    orig_schema_editor = conn.schema_editor
+    connection_created.connect(_forbid_extra_connections)
+    conn.schema_editor = _forbid_schema_editor
+    try:
+        with transaction.atomic(using=database):
+            try:
+                with conn.cursor() as cur:
+                    # Primeira instrução SQL da transação: SET TRANSACTION READ ONLY
+                    cur.execute("SET TRANSACTION READ ONLY;")
+                    cur.execute("SHOW transaction_read_only;")
+                    row = cur.fetchone()
+                    tx_ro = row[0] if row else None
+                    if tx_ro != "on":
+                        raise RuntimeError(
+                            f"Violação de segurança transacional no Django: esperado transaction_read_only='on', obtido '{tx_ro}'."
+                        )
+                    cur.execute("SELECT current_database(), current_setting('server_version');")
+                    dbname, srv_ver = cur.fetchone()
+                    print(
+                        f"✓ Transação Django protegida: vendor={conn.vendor} | db={dbname} "
+                        f"| PG={srv_ver} | SSL={'ativo' if require_ssl else 'local'} | transaction_read_only={tx_ro}"
+                    )
+
+                call_command("migrate", plan=True, database=database)
+                return tx_ro
+            finally:
+                # Garante que a transação termine sempre em ROLLBACK, mesmo sem exceção
+                transaction.set_rollback(True, using=database)
+    finally:
+        conn.schema_editor = orig_schema_editor
+        connection_created.disconnect(_forbid_extra_connections)
 
 
 def main():
