@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_search_tables, reverse_search_tables),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='QueryLog',
@@ -64,4 +62,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_search_tables, reverse_search_tables),
     ]

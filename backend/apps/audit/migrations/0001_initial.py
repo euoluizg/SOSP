@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_audit_tables, reverse_audit_tables),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='AuditEvent',
@@ -71,4 +69,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_audit_tables, reverse_audit_tables),
     ]

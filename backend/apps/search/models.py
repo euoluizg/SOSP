@@ -8,6 +8,7 @@ class QueryLog(models.Model):
     term = models.CharField(max_length=200)
     filters = models.JSONField(default=dict)
     result_count = models.IntegerField(db_column="resultcount", default=0)
+    session_hash = models.CharField(db_column="sessionhash", max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
 
     class Meta:
@@ -22,12 +23,10 @@ class QueryLog(models.Model):
 class Synonym(models.Model):
     """Sinônimos de termos de busca (searchSynonym)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    term = models.CharField(max_length=100)
+    term = models.CharField(max_length=100, unique=True)
     synonyms = CompatibleArrayField(models.CharField(max_length=100))
     is_active = models.BooleanField(db_column="isactive", default=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
-    updated_at = models.DateTimeField(db_column="updatedat", auto_now=True)
-    deleted_at = models.DateTimeField(db_column="deletedat", null=True, blank=True)
 
     class Meta:
         db_table = "searchsynonym"

@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from common.fields import CompositeKeyForeignKey, CompositeKeyModel
 
 class Agency(models.Model):
     """Órgão da administração pública (catalogAgency)."""
@@ -71,7 +72,7 @@ class NonWorkingDay(models.Model):
     unit = models.ForeignKey("catalog.Unit", db_column="unitid", on_delete=models.CASCADE, null=True, blank=True)
     day_date = models.DateField(db_column="daydate")
     description = models.CharField(max_length=120)
-    is_recurring = models.BooleanField(db_column="isrecurring", default=False)
+    scope = models.CharField(max_length=20, default="national")
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
 
     class Meta:
@@ -107,19 +108,46 @@ class Service(models.Model):
     def __str__(self):
         return self.name
 
-class ServiceAgency(models.Model):
+class ServiceAgency(CompositeKeyModel):
     """Associação N:N entre Serviços e Órgãos (catalogServiceAgency)."""
-    service = models.ForeignKey("catalog.Service", db_column="serviceid", on_delete=models.CASCADE)
-    agency = models.ForeignKey("catalog.Agency", db_column="agencyid", on_delete=models.CASCADE)
+    _composite_key_fields = ("service", "agency")
+
+    service = CompositeKeyForeignKey(
+        "catalog.Service",
+        db_column="serviceid",
+        related_name="service_agencies",
+        on_delete=models.CASCADE,
+        primary_key=True,
+    )
+    agency = models.ForeignKey(
+        "catalog.Agency",
+        db_column="agencyid",
+        related_name="agency_services",
+        on_delete=models.CASCADE,
+    )
 
     class Meta:
         db_table = "catalogserviceagency"
         unique_together = (("service", "agency"),)
 
-class UnitService(models.Model):
+
+class UnitService(CompositeKeyModel):
     """Associação N:N entre Unidades e Serviços (catalogUnitService)."""
-    unit = models.ForeignKey("catalog.Unit", db_column="unitid", on_delete=models.CASCADE)
-    service = models.ForeignKey("catalog.Service", db_column="serviceid", on_delete=models.CASCADE)
+    _composite_key_fields = ("unit", "service")
+
+    unit = CompositeKeyForeignKey(
+        "catalog.Unit",
+        db_column="unitid",
+        related_name="unit_services",
+        on_delete=models.CASCADE,
+        primary_key=True,
+    )
+    service = models.ForeignKey(
+        "catalog.Service",
+        db_column="serviceid",
+        related_name="service_units",
+        on_delete=models.CASCADE,
+    )
     is_active = models.BooleanField(db_column="isactive", default=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
 
@@ -159,9 +187,8 @@ class Faq(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     question = models.CharField(max_length=300)
     answer = models.CharField(max_length=2000)
-    service = models.ForeignKey("catalog.Service", db_column="serviceid", on_delete=models.SET_NULL, null=True, blank=True)
+    service = models.ForeignKey("catalog.Service", db_column="serviceid", on_delete=models.CASCADE, null=True, blank=True)
     category = models.CharField(max_length=30, null=True, blank=True)
-    sort_order = models.SmallIntegerField(db_column="sortorder", default=0)
     is_active = models.BooleanField(db_column="isactive", default=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
     updated_at = models.DateTimeField(db_column="updatedat", auto_now=True)
@@ -170,22 +197,20 @@ class Faq(models.Model):
         db_table = "catalogfaq"
         verbose_name = "FAQ"
         verbose_name_plural = "FAQs"
-        ordering = ["sort_order"]
+        ordering = ["-created_at"]
 
 class ServiceVersion(models.Model):
     """Histórico versionado das fichas de serviços (catalogServiceVersion)."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    service = models.ForeignKey("catalog.Service", db_column="serviceid", on_delete=models.CASCADE)
+    service = models.ForeignKey("catalog.Service", db_column="serviceid", related_name="versions", on_delete=models.CASCADE)
     version = models.IntegerField()
     snapshot = models.JSONField()
-    change_summary = models.CharField(db_column="changesummary", max_length=300, null=True, blank=True)
-    created_by = models.UUIDField(db_column="createdby")
-    approved_by = models.UUIDField(db_column="approvedby", null=True, blank=True)
+    created_by = models.ForeignKey("accounts.InternalUser", db_column="createdby", on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
-    approved_at = models.DateTimeField(db_column="approvedat", null=True, blank=True)
 
     class Meta:
         db_table = "catalogserviceversion"
+        unique_together = (("service", "version"),)
         ordering = ["-version"]
 
 class CatalogServiceSearchView(models.Model):

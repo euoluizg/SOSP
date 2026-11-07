@@ -51,9 +51,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_baseline_sql, reverse_baseline_sql),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='Gender',
@@ -191,4 +189,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_baseline_sql, reverse_baseline_sql),
     ]

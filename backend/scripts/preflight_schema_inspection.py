@@ -82,8 +82,11 @@ DJANGO_CORE_TABLES: Set[str] = {
 EXPECTED_BASELINE_MIGRATIONS: List[Tuple[str, str]] = [
     ("accounts", "0001_initial"),
     ("catalog", "0001_initial"),
+    ("catalog", "0002_align_orm_state_with_schema"),
     ("search", "0001_initial"),
+    ("search", "0002_align_orm_state_with_schema"),
     ("guidance", "0001_initial"),
+    ("guidance", "0002_align_orm_state_with_schema"),
     ("scheduling", "0001_initial"),
     ("feedback", "0001_initial"),
     ("notifications", "0001_initial"),
@@ -241,7 +244,7 @@ def evaluate_schema_state(
         return (
             "ALREADY_PROVISIONED",
             (
-                "Todas as 36 tabelas de aplicação, 2 views e 11 migrações da baseline estão registradas. "
+                f"Todas as 36 tabelas de aplicação, 2 views e {len(EXPECTED_BASELINE_MIGRATIONS)} migrações da baseline estão registradas. "
                 "Nota: contagens de objetos atestam presença física, devendo a integridade semântica "
                 "ser garantida pela suíte de testes de integração."
             ),

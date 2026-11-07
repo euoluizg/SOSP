@@ -24,9 +24,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_reports_tables, reverse_reports_tables),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='ReportExport',
@@ -49,4 +47,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_reports_tables, reverse_reports_tables),
     ]

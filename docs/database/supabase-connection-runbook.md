@@ -119,10 +119,12 @@ Por padrão, novas instâncias do Supabase expõem todas as tabelas criadas no s
 
 ### 5.1 Diretriz de Segurança SOSP
 - O frontend Next.js consome exclusivamente os endpoints da API Django (`https://<api-domain>/api/v1/`), onde residem autenticação CPF/Argon2id, controle RBAC, validações RFC 7807 e auditoria imutável em `auditEvent`.
+- **RLS e Views com `security_invoker = true`:** O script `baseline_0001_schema.sql` habilita `ENABLE ROW LEVEL SECURITY` nas **36 tabelas de domínio do SOSP** (negando acesso por padrão a roles não-proprietárias sem políticas explícitas) e cria as duas views analíticas (`vw_catalogServiceSearch` e `vw_schedulingSlotAvailability`) com `WITH (security_invoker = true)`, impedindo bypass de RLS.
 - **Atenção:** **NÃO presuma que a Supabase Data API já esteja desabilitada.** É obrigatório verificar visualmente no painel do Supabase.
-- **Ação Recomendada no Painel:**
+- **Ações Recomendadas no Painel e Pós-Implantação:**
   1. Acesse **Project Settings > API > Data API Settings**.
-  2. No campo **"Exposed schemas"**, desmarque o schema `public` se nenhum client direto for utilizado, ou garanta que as roles `anon` e `authenticated` não tenham privilégios concedidos nas tabelas de negócio do SOSP.
+  2. No campo **"Exposed schemas"**, remova o schema `public` se nenhum client direto do Supabase for utilizado.
+  3. Garanta que as roles `PUBLIC`, `anon` e `authenticated` não possuam privilégios DML (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) concedidos nas tabelas e views do SOSP no schema `public`.
 
 ---
 
@@ -177,10 +179,10 @@ python backend/scripts/preflight_schema_inspection.py
     > A aplicação de qualquer migration requer **aprovação humana formal e explícita** do Tech Lead e CODEOWNER (`@euoluizg`).
 - `🔵 STATUS: BASE TOTALMENTE IMPLANTADA (ALREADY_PROVISIONED)` (Exit code `0`):
   - Todas as 36 tabelas SOSP e 2 views presentes.
-  - Todas as 11 migrações Django registradas em `django_migrations`.
+  - Todas as 14 migrações Django registradas em `django_migrations` (11 migrações iniciais + 3 migrações `0002_align_orm_state_with_schema` de alinhamento de estado do ORM).
   - Zero tabelas desconhecidas.
   - > [!NOTE]
-    > Contagens quantitativas de tabelas (36 SOSP + 2 Django) e registros de migrations atestam a presença dos objetos físicos, devendo a integridade funcional ser complementada e comprovada pela suíte de testes de integração da aplicação.
+    > Contagens quantitativas de tabelas (36 SOSP + 2 Django) e registros de migrations atestam a presença dos objetos físicos, devendo a integridade funcional ser complementada e comprovada pela suíte de testes de integração da aplicação (`62` testes automatizados em PostgreSQL).
 - `🟡 STATUS: ESTADO PARCIAL DETECTADO (PARTIAL_STATE)` (Exit code `2`):
   - Tabelas ou migrações incompletas no banco.
   - **Ação:** Migração bloqueada. Requer investigação detalhada de integridade.
@@ -220,10 +222,10 @@ python backend/scripts/preflight_schema_inspection.py
 - **Sem Point-in-Time Recovery (PITR):** O recurso PITR não existe no plano Free (exclusivo para planos pagos/Pro).
 - **Sem Restauração de Snapshot Point-and-Click:** O plano gratuito não oferece restauração automática diária com reversão de estado pelo painel com um clique.
 
-### 8.2 Plano Oficial de Backup e Restauração Lógica Manual
-Para suprir as limitações do plano Free, adote o procedimento de backup lógico via ferramentas nativas do PostgreSQL (`pg_dump` e `pg_restore`):
+### 8.2 Plano Oficial de Backup e Restauração Lógica Manual (`--schema=public`)
+Para suprir as limitações do plano Free sem interferir nos schemas gerenciados pelo Supabase (`auth`, `storage`, `extensions`, `vault`), adote o procedimento de backup lógico restrito ao schema `public`:
 
-1. **Geração de Backup Lógico Pré-Deploy / Pré-Migração:**
+1. **Geração de Backup Lógico Pré-Deploy / Pré-Migração (`pg_dump`):**
    ```bash
    # Executado a partir de ambiente seguro autorizado com pg_dump instalado
    pg_dump \
@@ -231,30 +233,26 @@ Para suprir as limitações do plano Free, adote o procedimento de backup lógic
      -p 5432 \
      -U "postgres.<project-ref>" \
      -d postgres \
-     -F c \
-     -b \
-     -v \
-     -f "./backups/sosp_pre_migration_$(date +%Y%m%d_%H%M%S).dump"
+     --schema=public \
+     --no-owner \
+     --no-privileges \
+     -f "./backups/sosp_public_backup_$(date +%Y%m%d_%H%M%S).sql"
    ```
 2. **Armazenamento Seguro do Dump:**
-   - Os arquivos de dump devem ser imediatamente transferidos para armazenamento frio criptografado (ex.: bucket privado S3 com criptografia SSE-KMS e retenção versionada).
+   - Os arquivos de dump devem ser imediatamente transferidos para armazenamento criptografado privado (ex.: bucket privado S3 com criptografia SSE-KMS e retenção versionada).
    - **NUNCA armazene dumps no Git ou em servidores web públicos.**
-3. **Procedimento Testado de Restauração em Caso de Desastre (`pg_restore`):**
-   ```bash
-   # Restauração controlada do dump binário estrutural
-   pg_restore \
-     -h aws-1-sa-east-1.pooler.supabase.com \
-     -p 5432 \
-     -U "postgres.<project-ref>" \
-     -d postgres \
-     --clean \
-     --if-exists \
-     -v \
-     "./backups/sosp_pre_migration_YYYYMMDD_HHMMSS.dump"
-   ```
-4. **Política de "Forward Migrations":**
-   - Correções estruturais devem ser implementadas como novas migrations aditivas e compatíveis para frente (`0002_fix_...`), nunca via rollback destrutivo.
-5. **Fallback de Emergência para In-Memory:**
+3. **Distinção Obrigatória de Recuperação (Banco Vazio vs. Banco com Dados):**
+   - **Cenário 1 — Falha Durante a Primeira Implantação (Banco Ainda Vazio / Etapa 4C.2):**
+     - Como `baseline_0001_schema.sql` e cada migration do Django executam em transações atômicas (`BEGIN ... COMMIT`), uma falha durante `accounts.0001_initial` reverte automaticamente todas as 36 tabelas e 2 views (estado permanece `0` tabelas).
+     - Caso a falha ocorra em uma migration subsequente com banco comprovadamente sem dados de negócio (`0` registros nas 36 tabelas), pode-se reexecutar `python backend/manage.py migrate` após corrigir a causa.
+   - **Cenário 2 — Recuperação em Banco Já Contendo Dados:**
+     - **Jamais execute `migrate accounts zero`, `DROP SCHEMA public CASCADE` ou `TRUNCATE`.**
+     - Valide o dump primeiro em uma instância PostgreSQL isolada de homologação:
+       ```bash
+       psql -h <host-isolado> -U <user> -d sosp_restore_test -v ON_ERROR_STOP=1 -f "./backups/sosp_public_backup_YYYYMMDD_HHMMSS.sql"
+       ```
+     - Aplique correções estruturais exclusivamente via **Forward Migrations** aditivas (`0003_...`) após backup lógico verificado.
+4. **Fallback de Emergência para In-Memory:**
    - Em caso de indisponibilidade severa do banco remoto, reinicie o backend com `REPOSITORY_BACKEND=memory` para manter a navegação consultiva de serviços operando.
 
 > [!NOTE]
