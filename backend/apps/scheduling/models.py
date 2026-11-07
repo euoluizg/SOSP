@@ -94,8 +94,6 @@ class ProtocolTransition(models.Model):
     actor_id = models.UUIDField(db_column="actorid", null=True, blank=True)
     note = models.CharField(max_length=1000, null=True, blank=True)
     created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
-    note = models.CharField(max_length=1000, null=True, blank=True)
-    created_at = models.DateTimeField(db_column="createdat", auto_now_add=True)
 
     class Meta:
         db_table = "schedulingprotocoltransition"
