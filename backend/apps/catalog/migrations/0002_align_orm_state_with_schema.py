@@ -1,19 +1,31 @@
 import common.fields
 import django.db.models.deletion
-from django.db import migrations, models
+from django.db import IntegrityError, migrations, models, transaction
+
+
+def _verify_table_counts_and_keys(cursor, table_name: str, key_expr: str, before_keys: list):
+    cursor.execute(f"SELECT {key_expr} FROM {table_name} ORDER BY {key_expr};")
+    after_keys = cursor.fetchall()
+    if len(after_keys) != len(before_keys) or after_keys != before_keys:
+        raise IntegrityError(
+            f"Falha de integridade na reconstrução de '{table_name}': "
+            f"antes={len(before_keys)} registros, depois={len(after_keys)} registros."
+        )
 
 
 def align_sqlite_catalog_tables_forward(apps, schema_editor):
     """
     Em PostgreSQL: no-op (as tabelas físicas já nascem com o schema final em baseline_0001_schema.sql).
-    Em SQLite: migra a estrutura das 5 tabelas preservando 100% dos registros e relacionamentos existentes
-    e definindo chave primária composta real em catalogserviceagency e catalogunitservice.
+    Em SQLite: migra a estrutura das 5 tabelas sem perda silenciosa (sem INSERT OR IGNORE),
+    validando contagens, identidade dos registros e PRAGMA foreign_key_check.
     """
     if schema_editor.connection.vendor == "postgresql":
         return
 
-    with schema_editor.connection.cursor() as cursor:
+    with transaction.atomic(using=schema_editor.connection.alias), schema_editor.connection.cursor() as cursor:
         # 1. catalognonworkingday: substitui isrecurring por scope preservando linhas existentes
+        cursor.execute("SELECT id FROM catalognonworkingday ORDER BY id;")
+        nwd_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE catalognonworkingday__new (
@@ -37,9 +49,14 @@ def align_sqlite_catalog_tables_forward(apps, schema_editor):
         )
         cursor.execute("DROP TABLE catalognonworkingday;")
         cursor.execute("ALTER TABLE catalognonworkingday__new RENAME TO catalognonworkingday;")
-        cursor.execute("CREATE INDEX catalognonworkingday_unitid_idx ON catalognonworkingday (unitid);")
+        cursor.execute("CREATE INDEX idx_nonworkingday_unitid ON catalognonworkingday (unitid);")
+        cursor.execute("CREATE INDEX idx_nonworkingday_daydate ON catalognonworkingday (daydate);")
+        _verify_table_counts_and_keys(cursor, "catalognonworkingday", "id", nwd_before)
 
         # 2. catalogserviceagency: remove coluna artificial id, define PRIMARY KEY composta (serviceid, agencyid)
+        # Usa INSERT INTO estrito (sem OR IGNORE): duplicatas provocam IntegrityError e rollback transacional.
+        cursor.execute("SELECT serviceid, agencyid FROM catalogserviceagency ORDER BY serviceid, agencyid;")
+        sa_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE catalogserviceagency__new (
@@ -51,16 +68,20 @@ def align_sqlite_catalog_tables_forward(apps, schema_editor):
         )
         cursor.execute(
             """
-            INSERT OR IGNORE INTO catalogserviceagency__new (serviceid, agencyid)
+            INSERT INTO catalogserviceagency__new (serviceid, agencyid)
             SELECT serviceid, agencyid
             FROM catalogserviceagency;
             """
         )
         cursor.execute("DROP TABLE catalogserviceagency;")
         cursor.execute("ALTER TABLE catalogserviceagency__new RENAME TO catalogserviceagency;")
-        cursor.execute("CREATE INDEX idxCatalogServiceAgencyAgency ON catalogserviceagency (agencyid);")
+        cursor.execute("CREATE INDEX idx_serviceagency_agencyid ON catalogserviceagency (agencyid);")
+        _verify_table_counts_and_keys(cursor, "catalogserviceagency", "serviceid, agencyid", sa_before)
 
         # 3. catalogunitservice: remove coluna artificial id, define PRIMARY KEY composta (unitid, serviceid)
+        # Usa INSERT INTO estrito (sem OR IGNORE): duplicatas provocam IntegrityError e rollback transacional.
+        cursor.execute("SELECT unitid, serviceid FROM catalogunitservice ORDER BY unitid, serviceid;")
+        us_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE catalogunitservice__new (
@@ -74,16 +95,19 @@ def align_sqlite_catalog_tables_forward(apps, schema_editor):
         )
         cursor.execute(
             """
-            INSERT OR IGNORE INTO catalogunitservice__new (unitid, serviceid, isactive, createdat)
+            INSERT INTO catalogunitservice__new (unitid, serviceid, isactive, createdat)
             SELECT unitid, serviceid, isactive, createdat
             FROM catalogunitservice;
             """
         )
         cursor.execute("DROP TABLE catalogunitservice;")
         cursor.execute("ALTER TABLE catalogunitservice__new RENAME TO catalogunitservice;")
-        cursor.execute("CREATE INDEX idxCatalogUnitServiceService ON catalogunitservice (serviceid);")
+        cursor.execute("CREATE INDEX idx_unitservice_serviceid ON catalogunitservice (serviceid);")
+        _verify_table_counts_and_keys(cursor, "catalogunitservice", "unitid, serviceid", us_before)
 
         # 4. catalogfaq: remove sortorder e alinha FK serviceid ON DELETE CASCADE preservando linhas
+        cursor.execute("SELECT id FROM catalogfaq ORDER BY id;")
+        faq_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE catalogfaq__new (
@@ -107,9 +131,13 @@ def align_sqlite_catalog_tables_forward(apps, schema_editor):
         )
         cursor.execute("DROP TABLE catalogfaq;")
         cursor.execute("ALTER TABLE catalogfaq__new RENAME TO catalogfaq;")
-        cursor.execute("CREATE INDEX catalogfaq_serviceid_idx ON catalogfaq (serviceid);")
+        cursor.execute("CREATE INDEX idx_faq_serviceid ON catalogfaq (serviceid);")
+        cursor.execute("CREATE INDEX idx_faq_category ON catalogfaq (category);")
+        _verify_table_counts_and_keys(cursor, "catalogfaq", "id", faq_before)
 
         # 5. catalogserviceversion: remove changesummary/approvedby/approvedat, alinha FK createdby e UNIQUE (serviceid, version)
+        cursor.execute("SELECT id FROM catalogserviceversion ORDER BY id;")
+        sv_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE catalogserviceversion__new (
@@ -126,16 +154,30 @@ def align_sqlite_catalog_tables_forward(apps, schema_editor):
         cursor.execute(
             """
             INSERT INTO catalogserviceversion__new (id, version, snapshot, createdat, createdby, serviceid)
-            SELECT id, version, snapshot, createdat,
-                   CASE WHEN createdby IN (SELECT id FROM accountsinternaluser) THEN createdby ELSE NULL END,
-                   serviceid
+            SELECT id, version, snapshot, createdat, createdby, serviceid
             FROM catalogserviceversion;
             """
         )
         cursor.execute("DROP TABLE catalogserviceversion;")
         cursor.execute("ALTER TABLE catalogserviceversion__new RENAME TO catalogserviceversion;")
-        cursor.execute("CREATE INDEX catalogserviceversion_serviceid_idx ON catalogserviceversion (serviceid);")
-        cursor.execute("CREATE INDEX catalogserviceversion_createdby_idx ON catalogserviceversion (createdby);")
+        cursor.execute("CREATE INDEX idx_serviceversion_serviceid ON catalogserviceversion (serviceid);")
+        cursor.execute("CREATE INDEX idx_serviceversion_createdby ON catalogserviceversion (createdby);")
+        _verify_table_counts_and_keys(cursor, "catalogserviceversion", "id", sv_before)
+
+        # Valida integridade referencial de todas as tabelas reconstruídas no módulo catalog
+        for tbl in (
+            "catalognonworkingday",
+            "catalogserviceagency",
+            "catalogunitservice",
+            "catalogfaq",
+            "catalogserviceversion",
+        ):
+            cursor.execute(f"PRAGMA foreign_key_check({tbl});")
+            fk_violations = cursor.fetchall()
+            if fk_violations:
+                raise IntegrityError(
+                    f"Violação de integridade referencial (PRAGMA foreign_key_check) em '{tbl}': {fk_violations}"
+                )
 
 
 class Migration(migrations.Migration):
@@ -147,12 +189,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(
-                    align_sqlite_catalog_tables_forward,
-                    reverse_code=migrations.RunPython.noop,
-                ),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.AlterModelOptions(
                     name="faq",
@@ -273,4 +310,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(align_sqlite_catalog_tables_forward),
     ]

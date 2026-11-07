@@ -406,9 +406,36 @@ Em [`backend/common/fields.py`](../../backend/common/fields.py), foram implement
   - `in_bulk()` e `bulk_update()` são **bloqueados com `ValueError`**.
 - **Evolução Futura para Django 5.2+:** Quando o projeto realizar upgrade planejado para Django 5.2 LTS, `ServiceAgency` e `UnitService` poderão migrar para `pk = models.CompositePrimaryKey("service", "agency")` e `pk = models.CompositePrimaryKey("unit", "service")`.
 
-### 13.3. Migrações Não-Destrutivas (`0002_align_orm_state_with_schema`)
-- **No PostgreSQL:** As migrations `0002_align_orm_state_with_schema` (`catalog`, `search`, `guidance`) são estritamente **no-op no banco físico**, pois `baseline_0001_schema.sql` já cria as 36 tabelas com o schema definitivo na migration `0001_initial`.
-- **No SQLite:** As migrations `0002_align_orm_state_with_schema` realizam cópia estrutural (`CREATE TABLE ...__new`, `INSERT INTO ...__new SELECT ...`, `DROP TABLE`, `RENAME TO`), **preservando 100% dos registros e relacionamentos pré-existentes** e definindo `PRIMARY KEY (serviceid, agencyid)` e `PRIMARY KEY (unitid, serviceid)` em `catalogserviceagency` e `catalogunitservice`.
+### 13.3. Migrações Não-Destrutivas, Integridade SQLite e Reversibilidade (`0002_align_orm_state_with_schema`)
+
+#### A. Comportamento no PostgreSQL vs. SQLite
+- **No PostgreSQL (`vendor == "postgresql"`):** As 3 migrations `0002_align_orm_state_with_schema` (`catalog`, `search`, `guidance`) são estritamente **no-op no banco físico**, pois `baseline_0001_schema.sql` já cria as 36 tabelas com o schema definitivo na migration `0001_initial`.
+- **No SQLite (`vendor == "sqlite"`):** As migrations `0002_align_orm_state_with_schema` executam o procedimento `CREATE TABLE ...__new` → `INSERT INTO ...__new SELECT ...` → `DROP TABLE` → `ALTER TABLE ... RENAME TO` → recriação dos índices (`CREATE INDEX`), **preservando 100% dos registros e relacionamentos válidos pré-existentes** e definindo `PRIMARY KEY (serviceid, agencyid)` e `PRIMARY KEY (unitid, serviceid)` em `catalogserviceagency` e `catalogunitservice`.
+
+#### B. Cópia Estrita sem Perda Silenciosa e Rollback Transacional
+- **Proibição de `INSERT OR IGNORE`:** As cópias para `catalogserviceagency__new`, `catalogunitservice__new`, `catalogserviceversion__new` e `searchsynonym__new` utilizam `INSERT INTO` estrito (sem `OR IGNORE` e sem nulificação silenciosa de chaves estrangeiras inválidas).
+- **Verificação Antes e Depois + `PRAGMA foreign_key_check`:**
+  - Antes e depois de cada reconstrução, a migration confere a lista ordenada de chaves primárias/compostas (`SELECT <pk> ORDER BY <pk>`), garantindo identidade e contagem exatas;
+  - Ao final de cada módulo, executa `PRAGMA foreign_key_check(<tabela>)` sobre todas as tabelas reconstruídas, lançando `IntegrityError` caso exista qualquer referência órfã;
+  - Todo o bloco SQLite roda protegido por `transaction.atomic(using=schema_editor.connection.alias)` (savepoint transacional), garantindo que qualquer conflito de unicidade ou FK órfã interrompa imediatamente a migração com `IntegrityError` e reverta integralmente o banco ao estado `0001_initial` antes da verificação final do `SchemaEditor`.
+- **Ausência de Efeito Colateral do `DROP TABLE`:** Todas as 8 tabelas reconstruídas via `DROP TABLE` (`catalognonworkingday`, `catalogserviceagency`, `catalogunitservice`, `catalogfaq`, `catalogserviceversion`, `searchsynonym`, `guidanceprogress`, `guidancegeneratedpdf`) são **tabelas-folha** no grafo de chaves estrangeiras (nenhuma outra tabela aponta para elas), e o `SQLiteSchemaEditor` executa com `PRAGMA foreign_keys = OFF` e `PRAGMA legacy_alter_table = OFF`. Assim, o `DROP TABLE` da tabela antiga jamais dispara `ON DELETE CASCADE` nem afeta tabelas relacionadas (`catalogagency`, `catalogunit`, `catalogservice`, `accountsinternaluser`, `accountscitizen`).
+
+#### C. Colunas Legadas Descartadas de `0001_initial` e Mapeamento de Dados
+As seguintes colunas existiam apenas no estado inicial `0001_initial` do ORM (divergentes do contrato `docs/database/schema.sql`) e são descartadas na transição para `0002_align_orm_state_with_schema`:
+
+| Tabela | Coluna(s) de `0001_initial` Descartada(s) | Tratamento na Migração `0002` / Dados Não Representáveis no Novo Esquema |
+| :--- | :--- | :--- |
+| `catalognonworkingday` | `isrecurring` (`bool`) | Substituída por `scope` (`varchar(20)`), derivado como `'unit'` quando `unitid IS NOT NULL` e `'national'` quando `unitid IS NULL`. A flag booleana `isrecurring` deixa de existir no novo esquema. |
+| `catalogserviceagency` | `id` (`bigint` autoincremento) | Substituída pela chave primária composta `(serviceid, agencyid)`. Pares `(serviceid, agencyid)` duplicados não são representáveis no novo esquema e abortam a migração com `IntegrityError`. |
+| `catalogunitservice` | `id` (`bigint` autoincremento) | Substituída pela chave primária composta `(unitid, serviceid)`. Pares `(unitid, serviceid)` duplicados não são representáveis no novo esquema e abortam a migração com `IntegrityError`. |
+| `catalogfaq` | `sortorder` (`smallint`) | Coluna removida conforme `schema.sql`; a ordenação passa a utilizar `-createdat`. |
+| `catalogserviceversion` | `changesummary`, `approvedby`, `approvedat` | Colunas removidas conforme `schema.sql`. Além disso, `createdby` passa a exigir integridade referencial com `accountsinternaluser(id)` e `(serviceid, version)` passa a exigir unicidade composta; registros órfãos ou versões duplicadas abortam a migração com `IntegrityError`. |
+| `searchsynonym` | `updatedat`, `deletedat` | Colunas removidas conforme `schema.sql`. A coluna `term` passa a exigir restrição `UNIQUE`; termos duplicados abortam a migração com `IntegrityError`. |
+| `guidanceprogress` | `createdat` | O valor temporal de `createdat` é integralmente preservado e copiado para a coluna oficial `startedat` (`COALESCE(createdat, updatedat, CURRENT_TIMESTAMP)`). |
+
+#### D. Governança das Migrations Históricas (`0001_initial.py`) e Irreversibilidade de `0002`
+- **Ordem de Operações em `0001_initial.py`:** Nos 9 arquivos `0001_initial.py`, a operação `migrations.RunPython(apply_*_tables, reverse_*_tables)` está posicionada imediatamente **após** `migrations.SeparateDatabaseAndState(database_operations=[], state_operations=[...])`. Isso é indispensável porque, no Django 5.1, `SeparateDatabaseAndState.database_forwards()` executa `database_operations` passando `from_state.apps` *antes* de aplicar `state_operations` (`CreateModel`), o que causava `LookupError: No installed app with label 'accounts'` em qualquer instalação SQLite nova. Posicionar `RunPython` após `SeparateDatabaseAndState` garante que `from_state.apps` já contenha os models declarados em `0001_initial`, mantendo `state_operations` 100% inalterado, zero impacto em bancos já migrados (que rastreiam migrations por `(app, name)` em `django_migrations`) e comportamento idêntico no PostgreSQL.
+- **Irreversibilidade Explícita de `0002_align_orm_state_with_schema`:** Como a transição para o esquema oficial descarta colunas legadas de `0001_initial` (tabela acima), as 3 migrations `0002_align_orm_state_with_schema` **não definem `reverse_code`** em `migrations.RunPython(...)`. Qualquer tentativa de rollback para `0001_initial` é bloqueada pelo Django com `django.db.migrations.exceptions.IrreversibleError`, impedindo que o estado lógico de migrations seja revertido sem restaurar a estrutura física das tabelas.
 
 ---
 
@@ -417,5 +444,5 @@ Em [`backend/common/fields.py`](../../backend/common/fields.py), foram implement
 A base de dados e a camada ORM do Django estão **completamente implementadas, alinhadas 1:1 (36 models e 2 views) e homologadas**.
 
 - **Branch Atual:** `fix/backend/orm-schema-alignment`
-- **Quality Gates:** 100% aprovados localmente e no CI (`65` testes na suíte completa).
+- **Quality Gates:** 100% aprovados localmente e no CI (`67` testes na suíte completa).
 - **Próxima Ação:** Revisão e aprovação formal do PR #14 pelo CODEOWNER `@euoluizg`.

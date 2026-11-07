@@ -16,6 +16,7 @@ import pytest
 from django.conf import settings
 from django.db import IntegrityError, connection, connections
 from django.db.backends.sqlite3.base import DatabaseWrapper as SQLiteDatabaseWrapper
+from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
 
 from apps.catalog.models import Agency, Service, ServiceAgency, Unit, UnitService
@@ -54,6 +55,8 @@ def test_sqlite_empty_initialization_and_populated_data_migration_preserves_all_
         with conn_empty.cursor() as cur:
             cur.execute("SELECT count(*) FROM django_migrations;")
             assert cur.fetchone()[0] == 14
+            cur.execute("PRAGMA foreign_key_check;")
+            assert cur.fetchall() == []
     finally:
         conn_empty.close()
 
@@ -269,8 +272,249 @@ def test_sqlite_empty_initialization_and_populated_data_migration_preserves_all_
         assert pdf_after.service_id == srv1.id
         assert pdf_after.file_url == "https://sosp.gov.br/pdfs/c1.pdf"
         assert pdf_after.checklist_hash == "legacy_migrated_hash"
+
+        # Verifica PRAGMA foreign_key_check global, ausência de tabelas temporárias __new,
+        # preservação das tabelas relacionadas (pais) e índices/constraints das tabelas reconstruídas
+        with conn_pop.cursor() as cur:
+            cur.execute("PRAGMA foreign_key_check;")
+            assert cur.fetchall() == []
+
+            cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%__new';")
+            assert cur.fetchall() == []
+
+            # Confirma que DROP TABLE nas tabelas-folha não afetou nenhuma tabela relacionada
+            cur.execute("SELECT count(*) FROM catalogagency;")
+            assert cur.fetchone()[0] == 2
+            cur.execute("SELECT count(*) FROM catalogunit;")
+            assert cur.fetchone()[0] == 1
+            cur.execute("SELECT count(*) FROM catalogservice;")
+            assert cur.fetchone()[0] == 2
+            cur.execute("SELECT count(*) FROM accountsinternaluser;")
+            assert cur.fetchone()[0] == 1
+            cur.execute("SELECT count(*) FROM accountscitizen;")
+            assert cur.fetchone()[0] == 1
+
+            # Verifica índices reconstruídos nas tabelas alinhadas
+            expected_indexes = {
+                "catalognonworkingday": {"idx_nonworkingday_unitid", "idx_nonworkingday_daydate"},
+                "catalogserviceagency": {"idx_serviceagency_agencyid"},
+                "catalogunitservice": {"idx_unitservice_serviceid"},
+                "catalogfaq": {"idx_faq_serviceid", "idx_faq_category"},
+                "catalogserviceversion": {"idx_serviceversion_serviceid"},
+                "searchquerylog": {"idx_searchquerylog_term", "idx_searchquerylog_createdat"},
+                "guidanceprogress": {"idx_guidanceprogress_citizenid"},
+                "guidancegeneratedpdf": {"idx_guidancepdf_citizenid", "idx_guidancepdf_expiresat"},
+            }
+            for tbl, req_idx in expected_indexes.items():
+                cur.execute(f"PRAGMA index_list({tbl});")
+                found_idx = {row[1] for row in cur.fetchall()}
+                assert req_idx.issubset(found_idx), f"Índices ausentes em {tbl}: {req_idx - found_idx}"
+
+            # Verifica PK composta física em catalogserviceagency e catalogunitservice
+            cur.execute("PRAGMA table_info(catalogserviceagency);")
+            sa_pk_cols = [row[1] for row in sorted(cur.fetchall(), key=lambda r: r[5]) if row[5] > 0]
+            assert sa_pk_cols == ["serviceid", "agencyid"]
+
+            cur.execute("PRAGMA table_info(catalogunitservice);")
+            us_pk_cols = [row[1] for row in sorted(cur.fetchall(), key=lambda r: r[5]) if row[5] > 0]
+            assert us_pk_cols == ["unitid", "serviceid"]
     finally:
         conn_pop.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_sqlite_migration_fails_and_rolls_back_on_duplicate_or_conflicting_records(tmp_path):
+    """
+    Comprova que a migração SQLite:
+    1. Não usa INSERT OR IGNORE (não descarta registros duplicados silenciosamente);
+    2. Interrompe-se com IntegrityError explícito diante de duplicatas em catalogserviceagency,
+       catalogunitservice ou catalogserviceversion, ou de FK órfã em catalogserviceversion;
+    3. Faz rollback transacional completo, preservando o estado e os registros originais de 0001_initial.
+    """
+    scenarios = [
+        "duplicate_serviceagency",
+        "duplicate_unitservice",
+        "duplicate_serviceversion",
+        "orphan_fk_serviceversion",
+        "duplicate_synonym_term",
+    ]
+
+    for scenario in scenarios:
+        db_path = str(tmp_path / f"conflict_{scenario}.sqlite3")
+        conn_conflict = _make_isolated_sqlite_connection(db_path)
+        try:
+            executor = MigrationExecutor(conn_conflict)
+            targets_0001 = [
+                ("accounts", "0001_initial"),
+                ("catalog", "0001_initial"),
+                ("search", "0001_initial"),
+            ]
+            state_0001 = executor.migrate(targets_0001)
+            apps_0001 = state_0001.apps
+
+            Agency0001 = apps_0001.get_model("catalog", "Agency")
+            Unit0001 = apps_0001.get_model("catalog", "Unit")
+            Service0001 = apps_0001.get_model("catalog", "Service")
+            InternalUser0001 = apps_0001.get_model("accounts", "InternalUser")
+
+            u_admin = InternalUser0001.objects.using("sqlite_mig_test").create(
+                cpf="11122233344",
+                full_name="Admin Conflict",
+                email="admin@sosp.gov.br",
+                password_hash="hash",
+                role="admin",
+                can_manage_catalog=True,
+            )
+            ag = Agency0001.objects.using("sqlite_mig_test").create(
+                name="Orgao C", acronym="OC", sphere="state", is_active=True
+            )
+            un = Unit0001.objects.using("sqlite_mig_test").create(
+                agency=ag,
+                name="Unidade C",
+                zip_code="57000000",
+                street="Rua C",
+                address_number="1",
+                neighborhood="Centro",
+                city="Maceio",
+                state="AL",
+                daily_limit=50,
+            )
+            srv = Service0001.objects.using("sqlite_mig_test").create(
+                name="Servico C",
+                category="documents",
+                detailed_description="Det C",
+                eligibility="Elig C",
+                is_free=True,
+                average_deadline_days=5,
+                channel="inPerson",
+                status="active",
+            )
+
+            with conn_conflict.cursor() as cur:
+                if scenario == "duplicate_serviceagency":
+                    # Simula base legada sem índice único contendo 2 linhas duplicadas (serviceid, agencyid)
+                    cur.execute("PRAGMA index_list(catalogserviceagency);")
+                    for idx_row in cur.fetchall():
+                        if not idx_row[1].startswith("sqlite_autoindex"):
+                            cur.execute(f'DROP INDEX IF EXISTS "{idx_row[1]}";')
+                    cur.execute(
+                        "INSERT INTO catalogserviceagency (serviceid, agencyid) VALUES (%s, %s), (%s, %s);",
+                        [srv.id.hex, ag.id.hex, srv.id.hex, ag.id.hex],
+                    )
+                elif scenario == "duplicate_unitservice":
+                    cur.execute("PRAGMA index_list(catalogunitservice);")
+                    for idx_row in cur.fetchall():
+                        if not idx_row[1].startswith("sqlite_autoindex"):
+                            cur.execute(f'DROP INDEX IF EXISTS "{idx_row[1]}";')
+                    cur.execute(
+                        """
+                        INSERT INTO catalogunitservice (unitid, serviceid, isactive, createdat)
+                        VALUES (%s, %s, 1, '2026-01-01 00:00:00'), (%s, %s, 0, '2026-01-02 00:00:00');
+                        """,
+                        [un.id.hex, srv.id.hex, un.id.hex, srv.id.hex],
+                    )
+                elif scenario == "duplicate_serviceversion":
+                    # No estado 0001_initial, catalogserviceversion não possuía unique(serviceid, version)
+                    cur.execute(
+                        """
+                        INSERT INTO catalogserviceversion (id, serviceid, version, snapshot, createdby, createdat)
+                        VALUES (%s, %s, 1, '{}', %s, '2026-01-01 00:00:00'),
+                               (%s, %s, 1, '{}', %s, '2026-01-02 00:00:00');
+                        """,
+                        [
+                            uuid.uuid4().hex,
+                            srv.id.hex,
+                            u_admin.id.hex,
+                            uuid.uuid4().hex,
+                            srv.id.hex,
+                            u_admin.id.hex,
+                        ],
+                    )
+                elif scenario == "orphan_fk_serviceversion":
+                    # No estado 0001_initial, createdby era apenas UUIDField sem FK física
+                    orphan_user_uuid = uuid.uuid4().hex
+                    cur.execute(
+                        """
+                        INSERT INTO catalogserviceversion (id, serviceid, version, snapshot, createdby, createdat)
+                        VALUES (%s, %s, 1, '{}', %s, '2026-01-01 00:00:00');
+                        """,
+                        [uuid.uuid4().hex, srv.id.hex, orphan_user_uuid],
+                    )
+                elif scenario == "duplicate_synonym_term":
+                    # No estado 0001_initial, searchsynonym.term não possuía restrição UNIQUE
+                    cur.execute(
+                        """
+                        INSERT INTO searchsynonym (id, term, synonyms, isactive, createdat, updatedat)
+                        VALUES (%s, 'cnh', '["habilitacao"]', 1, '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
+                               (%s, 'cnh', '["carteira motorista"]', 1, '2026-01-02 00:00:00', '2026-01-02 00:00:00');
+                        """,
+                        [uuid.uuid4().hex, uuid.uuid4().hex],
+                    )
+
+            target_app = "search" if scenario == "duplicate_synonym_term" else "catalog"
+            executor_fail = MigrationExecutor(conn_conflict)
+            with pytest.raises(IntegrityError):
+                executor_fail.migrate([(target_app, "0002_align_orm_state_with_schema")])
+
+            # Verifica que o rollback transacional preservou o estado original 0001_initial
+            with conn_conflict.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM django_migrations WHERE app = %s AND name = '0002_align_orm_state_with_schema';",
+                    [target_app],
+                )
+                assert cur.fetchone()[0] == 0
+
+                cur.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%__new';")
+                assert cur.fetchall() == []
+
+                if target_app == "catalog":
+                    # Confirma que a coluna legada isrecurring de catalognonworkingday ainda existe (rollback completo)
+                    cur.execute("PRAGMA table_info(catalognonworkingday);")
+                    cols_nwd = {r[1] for r in cur.fetchall()}
+                    assert "isrecurring" in cols_nwd
+                else:
+                    # Confirma que searchquerylog não recebeu sessionhash e searchsynonym manteve updatedat e 2 linhas
+                    cur.execute("PRAGMA table_info(searchquerylog);")
+                    cols_qlog = {r[1] for r in cur.fetchall()}
+                    assert "sessionhash" not in cols_qlog
+                    cur.execute("PRAGMA table_info(searchsynonym);")
+                    cols_syn = {r[1] for r in cur.fetchall()}
+                    assert "updatedat" in cols_syn
+                    cur.execute("SELECT count(*) FROM searchsynonym;")
+                    assert cur.fetchone()[0] == 2
+
+                # Confirma que nenhum registro original foi perdido no cenário de duplicata
+                if scenario == "duplicate_serviceagency":
+                    cur.execute("SELECT count(*) FROM catalogserviceagency;")
+                    assert cur.fetchone()[0] == 2
+                elif scenario == "duplicate_unitservice":
+                    cur.execute("SELECT count(*) FROM catalogunitservice;")
+                    assert cur.fetchone()[0] == 2
+                elif scenario == "duplicate_serviceversion":
+                    cur.execute("SELECT count(*) FROM catalogserviceversion;")
+                    assert cur.fetchone()[0] == 2
+        finally:
+            conn_conflict.close()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0002_migrations_are_explicitly_irreversible(tmp_path):
+    """
+    Confirma que as migrations 0002_align_orm_state_with_schema (catalog, search, guidance)
+    não possuem reverse_code falso (noop) e lançam IrreversibleError ao tentar reverter para 0001_initial.
+    """
+    db_path = str(tmp_path / "irreversible_test.sqlite3")
+    conn_irrev = _make_isolated_sqlite_connection(db_path)
+    try:
+        executor = MigrationExecutor(conn_irrev)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+        for app_label in ("catalog", "search", "guidance"):
+            executor_rev = MigrationExecutor(conn_irrev)
+            with pytest.raises(IrreversibleError):
+                executor_rev.migrate([(app_label, "0001_initial")])
+    finally:
+        conn_irrev.close()
 
 
 @pytest.mark.django_db

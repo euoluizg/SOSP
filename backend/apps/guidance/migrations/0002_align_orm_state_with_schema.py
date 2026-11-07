@@ -1,5 +1,5 @@
 import django.utils.timezone
-from django.db import migrations, models
+from django.db import IntegrityError, migrations, models, transaction
 
 
 def align_sqlite_guidance_tables_forward(apps, schema_editor):
@@ -11,8 +11,10 @@ def align_sqlite_guidance_tables_forward(apps, schema_editor):
     if schema_editor.connection.vendor == "postgresql":
         return
 
-    with schema_editor.connection.cursor() as cursor:
+    with transaction.atomic(using=schema_editor.connection.alias), schema_editor.connection.cursor() as cursor:
         # 1. guidanceprogress: migra createdat -> startedat e adiciona completedat preservando linhas
+        cursor.execute("SELECT id FROM guidanceprogress ORDER BY id;")
+        gp_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE guidanceprogress__new (
@@ -45,10 +47,16 @@ def align_sqlite_guidance_tables_forward(apps, schema_editor):
         )
         cursor.execute("DROP TABLE guidanceprogress;")
         cursor.execute("ALTER TABLE guidanceprogress__new RENAME TO guidanceprogress;")
-        cursor.execute("CREATE INDEX guidanceprogress_citizenid_idx ON guidanceprogress (citizenid);")
-        cursor.execute("CREATE INDEX guidanceprogress_serviceid_idx ON guidanceprogress (serviceid);")
+        cursor.execute("CREATE INDEX idx_guidanceprogress_citizenid ON guidanceprogress (citizenid);")
+        cursor.execute("CREATE INDEX idx_guidanceprogress_serviceid ON guidanceprogress (serviceid);")
+        cursor.execute("SELECT id FROM guidanceprogress ORDER BY id;")
+        gp_after = cursor.fetchall()
+        if gp_after != gp_before:
+            raise IntegrityError("Divergência de registros após reconstrução de guidanceprogress.")
 
         # 2. guidancegeneratedpdf: adiciona checklisthash preservando todas as linhas existentes
+        cursor.execute("SELECT id FROM guidancegeneratedpdf ORDER BY id;")
+        pdf_before = cursor.fetchall()
         cursor.execute(
             """
             CREATE TABLE guidancegeneratedpdf__new (
@@ -80,8 +88,21 @@ def align_sqlite_guidance_tables_forward(apps, schema_editor):
         )
         cursor.execute("DROP TABLE guidancegeneratedpdf;")
         cursor.execute("ALTER TABLE guidancegeneratedpdf__new RENAME TO guidancegeneratedpdf;")
-        cursor.execute("CREATE INDEX guidancegeneratedpdf_citizenid_idx ON guidancegeneratedpdf (citizenid);")
-        cursor.execute("CREATE INDEX guidancegeneratedpdf_serviceid_idx ON guidancegeneratedpdf (serviceid);")
+        cursor.execute("CREATE INDEX idx_guidancepdf_citizenid ON guidancegeneratedpdf (citizenid);")
+        cursor.execute("CREATE INDEX idx_guidancepdf_serviceid ON guidancegeneratedpdf (serviceid);")
+        cursor.execute("CREATE INDEX idx_guidancepdf_expiresat ON guidancegeneratedpdf (expiresat);")
+        cursor.execute("SELECT id FROM guidancegeneratedpdf ORDER BY id;")
+        pdf_after = cursor.fetchall()
+        if pdf_after != pdf_before:
+            raise IntegrityError("Divergência de registros após reconstrução de guidancegeneratedpdf.")
+
+        for tbl in ("guidanceprogress", "guidancegeneratedpdf"):
+            cursor.execute(f"PRAGMA foreign_key_check({tbl});")
+            fk_violations = cursor.fetchall()
+            if fk_violations:
+                raise IntegrityError(
+                    f"Violação de integridade referencial (PRAGMA foreign_key_check) em '{tbl}': {fk_violations}"
+                )
 
 
 class Migration(migrations.Migration):
@@ -92,12 +113,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(
-                    align_sqlite_guidance_tables_forward,
-                    reverse_code=migrations.RunPython.noop,
-                ),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.RemoveField(
                     model_name="guidanceprogress",
@@ -126,4 +142,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(align_sqlite_guidance_tables_forward),
     ]
