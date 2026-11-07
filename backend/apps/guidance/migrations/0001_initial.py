@@ -27,9 +27,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_guidance_tables, reverse_guidance_tables),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='GeneratedPdf',
@@ -66,4 +64,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_guidance_tables, reverse_guidance_tables),
     ]

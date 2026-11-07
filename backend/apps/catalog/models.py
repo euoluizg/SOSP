@@ -1,6 +1,6 @@
 import uuid
 from django.db import models
-from common.fields import CompositeKeyForeignKey
+from common.fields import CompositeKeyForeignKey, CompositeKeyModel
 
 class Agency(models.Model):
     """Órgão da administração pública (catalogAgency)."""
@@ -108,8 +108,10 @@ class Service(models.Model):
     def __str__(self):
         return self.name
 
-class ServiceAgency(models.Model):
+class ServiceAgency(CompositeKeyModel):
     """Associação N:N entre Serviços e Órgãos (catalogServiceAgency)."""
+    _composite_key_fields = ("service", "agency")
+
     service = CompositeKeyForeignKey(
         "catalog.Service",
         db_column="serviceid",
@@ -128,19 +130,11 @@ class ServiceAgency(models.Model):
         db_table = "catalogserviceagency"
         unique_together = (("service", "agency"),)
 
-    def save(self, *args, **kwargs):
-        if not self._state.adding and not kwargs.get("force_insert"):
-            return
-        kwargs["force_insert"] = True
-        return super().save(*args, **kwargs)
 
-    def delete(self, using=None, keep_parents=False):
-        return type(self).objects.using(using).filter(
-            service_id=self.service_id, agency_id=self.agency_id
-        ).delete()
-
-class UnitService(models.Model):
+class UnitService(CompositeKeyModel):
     """Associação N:N entre Unidades e Serviços (catalogUnitService)."""
+    _composite_key_fields = ("unit", "service")
+
     unit = CompositeKeyForeignKey(
         "catalog.Unit",
         db_column="unitid",
@@ -160,20 +154,6 @@ class UnitService(models.Model):
     class Meta:
         db_table = "catalogunitservice"
         unique_together = (("unit", "service"),)
-
-    def save(self, *args, **kwargs):
-        if not self._state.adding and not kwargs.get("force_insert"):
-            type(self).objects.filter(
-                unit_id=self.unit_id, service_id=self.service_id
-            ).update(is_active=self.is_active)
-            return
-        kwargs["force_insert"] = True
-        return super().save(*args, **kwargs)
-
-    def delete(self, using=None, keep_parents=False):
-        return type(self).objects.using(using).filter(
-            unit_id=self.unit_id, service_id=self.service_id
-        ).delete()
 
 class ServiceStep(models.Model):
     """Etapas do guia passo a passo do serviço (catalogServiceStep)."""

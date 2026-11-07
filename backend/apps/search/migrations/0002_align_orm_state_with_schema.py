@@ -1,12 +1,40 @@
 from django.db import migrations, models
 
 
-def align_sqlite_search_tables(apps, schema_editor):
-    if schema_editor.connection.vendor != "postgresql":
-        for model_name in ["Synonym", "QueryLog"]:
-            model = apps.get_model("search", model_name)
-            schema_editor.delete_model(model)
-            schema_editor.create_model(model)
+def align_sqlite_search_tables_forward(apps, schema_editor):
+    """
+    Em PostgreSQL: no-op (as tabelas físicas já possuem o schema final de baseline_0001_schema.sql).
+    Em SQLite: adiciona sessionhash em searchquerylog e remove updatedat/deletedat de searchsynonym
+    preservando integralmente os registros existentes.
+    """
+    if schema_editor.connection.vendor == "postgresql":
+        return
+
+    with schema_editor.connection.cursor() as cursor:
+        # 1. searchquerylog: adiciona coluna sessionhash sem perda de linhas
+        cursor.execute("ALTER TABLE searchquerylog ADD COLUMN sessionhash varchar(64) NULL;")
+
+        # 2. searchsynonym: remove updatedat e deletedat e aplica UNIQUE(term) preservando linhas
+        cursor.execute(
+            """
+            CREATE TABLE searchsynonym__new (
+                id char(32) NOT NULL PRIMARY KEY,
+                term varchar(100) NOT NULL UNIQUE,
+                synonyms text NOT NULL,
+                isactive bool NOT NULL DEFAULT 1,
+                createdat datetime NOT NULL
+            );
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO searchsynonym__new (id, term, synonyms, isactive, createdat)
+            SELECT id, term, synonyms, isactive, createdat
+            FROM searchsynonym;
+            """
+        )
+        cursor.execute("DROP TABLE searchsynonym;")
+        cursor.execute("ALTER TABLE searchsynonym__new RENAME TO searchsynonym;")
 
 
 class Migration(migrations.Migration):
@@ -19,7 +47,7 @@ class Migration(migrations.Migration):
         migrations.SeparateDatabaseAndState(
             database_operations=[
                 migrations.RunPython(
-                    align_sqlite_search_tables,
+                    align_sqlite_search_tables_forward,
                     reverse_code=migrations.RunPython.noop,
                 ),
             ],

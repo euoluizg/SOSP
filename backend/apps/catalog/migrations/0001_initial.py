@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(apply_catalog_tables, reverse_catalog_tables),
-            ],
+            database_operations=[],
             state_operations=[
                 migrations.CreateModel(
                     name='CatalogServiceSearchView',
@@ -253,4 +251,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        migrations.RunPython(apply_catalog_tables, reverse_catalog_tables),
     ]

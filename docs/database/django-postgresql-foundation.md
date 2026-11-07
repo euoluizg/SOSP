@@ -375,10 +375,47 @@ Se ocorrer qualquer erro durante a execução remota:
 
 ---
 
-## 13. Conclusão e Próximos Passos
+## 13. Governança de Chaves Primárias Compostas no Django 5.1 e Migrações Não-Destrutivas (`Etapa 4C.1.1`)
 
-A base de dados e a camada ORM do Django estão **completamente implementadas, testadas e prontas para produção**.
+### 13.1. Limitação Arquitetural do Django 5.1 vs. Django 5.2 (`CompositePrimaryKey`)
+No schema físico oficial do PostgreSQL (`docs/database/schema.sql` e `backend/common/sql/baseline_0001_schema.sql`), as duas tabelas associativas N:N possuem **chave primária composta de duas colunas**, sem coluna substituta `id`:
+- `catalogServiceAgency`: `PRIMARY KEY (serviceId, agencyId)`
+- `catalogUnitService`: `PRIMARY KEY (unitId, serviceId)`
 
-- **Branch Atual:** `feature/django-postgresql-foundation`
-- **Quality Gates:** 100% aprovados localmente.
-- **Próxima Ação:** Submissão de Pull Request para a branch `develop` via identidade do `sosp-agents-bot` e solicitação de review formal ao CODEOWNER `@euoluizg`.
+O Django 5.1.15 (versão homologada do backend) ainda não dispõe de `models.CompositePrimaryKey` nativo (recurso introduzido apenas no Django 5.2). No Django 5.1, todo model exige um campo com `primary_key=True` para impedir a injeção automática de uma coluna inexistente `id`.
+
+Contudo, apenas declarar `primary_key=True` na primeira coluna (`service` ou `unit`) e suprimir o alerta `fields.W342` introduziria riscos graves se utilizado com o `Model` e `QuerySet` padrões do Django:
+1. **Risco de Sobrescrita em `save()` / `update_or_create()`:** O `save_base()` padrão filtraria apenas pela primeira coluna (`WHERE unitid = ...`), sobrescrevendo `isActive` de todos os serviços da mesma unidade.
+2. **Risco de Exclusão em Massa via `Collector`:** Uma deleção baseada em `instance.pk` removeria todos os vínculos que compartilham a primeira coluna.
+3. **Risco de Colisão de Identidade em Memória (`__eq__` / `__hash__`):** Duas associações distintas `(S1, A1)` e `(S1, A2)` seriam consideradas iguais pelo `Model.__eq__` padrão.
+4. **Risco de Consultas Ambíguas por `pk` Escalar:** `get(pk=service_id)` ou `filter(pk=service_id)` operaria sobre apenas metade da chave composta.
+5. **Risco de Chave Simples Indevida no SQLite:** O `create_model()` padrão do SQLite criaria `PRIMARY KEY` apenas na primeira coluna, impedindo múltiplos vínculos para o mesmo serviço ou unidade em testes SQLite.
+
+### 13.2. Solução Segura Implementada (`CompositeKeyModel` + `CompositeKeyQuerySet`)
+Em [`backend/common/fields.py`](../../backend/common/fields.py), foram implementados `CompositeKeyForeignKey`, `CompositeKeyQuerySet` e `CompositeKeyModel` (herdados por `ServiceAgency` e `UnitService`):
+- **`_check_unique()` Condicionado:** Só suprime o aviso `fields.W342` quando o model declara explicitamente `_composite_key_fields = (col1, col2)` e `unique_together = ((col1, col2),)`.
+- **Operações Garantidas por Par Composto `(col1, col2)`:**
+  - `save()` em instância existente atualiza exclusivamente `WHERE col1 = v1 AND col2 = v2`.
+  - `delete()` (em instância e em `QuerySet`) executa `_raw_delete` com predicado completo, jamais agrupando por `pk` escalar.
+  - `__eq__` e `__hash__` utilizam `composite_pk = (col1_id, col2_id)`.
+  - Suporte a `pk` em formato de tupla: `get(pk=(col1_id, col2_id))`, `filter(pk=(col1_id, col2_id))` e `exclude(pk=(col1_id, col2_id))`.
+- **Restrições Explícitas de Uso Impostas no Django 5.1:**
+  - Consultas por `pk` escalar (`get(pk=val)`, `filter(pk=val)`, `exclude(pk=val)`, `filter(pk__in=...)`) são **bloqueadas com `ValueError`**.
+  - `get_or_create()` e `update_or_create()` exigem obrigatoriamente **ambas** as colunas da chave composta, lançando `ValueError` se chamadas com chave parcial.
+  - Alteração in-place de qualquer coluna da chave composta em uma instância já persistida seguida de `.save()` ou `.delete()` é **bloqueada com `ValueError`** (para substituir um vínculo, deve-se excluir o anterior e criar o novo).
+  - `in_bulk()` e `bulk_update()` são **bloqueados com `ValueError`**.
+- **Evolução Futura para Django 5.2+:** Quando o projeto realizar upgrade planejado para Django 5.2 LTS, `ServiceAgency` e `UnitService` poderão migrar para `pk = models.CompositePrimaryKey("service", "agency")` e `pk = models.CompositePrimaryKey("unit", "service")`.
+
+### 13.3. Migrações Não-Destrutivas (`0002_align_orm_state_with_schema`)
+- **No PostgreSQL:** As migrations `0002_align_orm_state_with_schema` (`catalog`, `search`, `guidance`) são estritamente **no-op no banco físico**, pois `baseline_0001_schema.sql` já cria as 36 tabelas com o schema definitivo na migration `0001_initial`.
+- **No SQLite:** As migrations `0002_align_orm_state_with_schema` realizam cópia estrutural (`CREATE TABLE ...__new`, `INSERT INTO ...__new SELECT ...`, `DROP TABLE`, `RENAME TO`), **preservando 100% dos registros e relacionamentos pré-existentes** e definindo `PRIMARY KEY (serviceid, agencyid)` e `PRIMARY KEY (unitid, serviceid)` em `catalogserviceagency` e `catalogunitservice`.
+
+---
+
+## 14. Conclusão e Próximos Passos
+
+A base de dados e a camada ORM do Django estão **completamente implementadas, alinhadas 1:1 (36 models e 2 views) e homologadas**.
+
+- **Branch Atual:** `fix/backend/orm-schema-alignment`
+- **Quality Gates:** 100% aprovados localmente e no CI (`65` testes na suíte completa).
+- **Próxima Ação:** Revisão e aprovação formal do PR #14 pelo CODEOWNER `@euoluizg`.
