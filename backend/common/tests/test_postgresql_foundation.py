@@ -991,3 +991,195 @@ print("SUBPROCESS_READONLY_PLAN_OK")
                 admin_cur.execute(f"DROP DATABASE IF EXISTS {empty_db_name};")
 
 
+def test_12_baseline_migration_atomic_rollback_on_controlled_failure_and_clean_reinstall():
+    """
+    12. Teste de falha controlada e rollback transacional da baseline em PostgreSQL real:
+    1. Inicia a migration inicial ('accounts.0001_initial') com banco vazio.
+    2. Injeta falha controlada APÓS a execução completa do DDL (comprovando que as 36 tabelas
+       existem dentro da transação não confirmada), mas ANTES do registro em django_migrations.
+    3. Confirma que a transação inteira é revertida pelo Django (sem COMMIT antecipado).
+    4. Confirma que nenhuma das 36 tabelas SOSP nem as 2 views permaneceram no banco.
+    5. Confirma ausência de migrations registradas parcialmente em django_migrations.
+    6. Repete a instalação normal no mesmo banco e valida as 14 migrations, 38 tabelas, 2 views, RLS
+       e 'makemigrations --check --dry-run'.
+    """
+    import os
+    import subprocess
+    import sys
+    import psycopg
+    from scripts.preflight_schema_inspection import (
+        DJANGO_CORE_TABLES,
+        EXPECTED_BASELINE_MIGRATIONS,
+        SOSP_EXPECTED_TABLES,
+        SOSP_EXPECTED_VIEWS,
+    )
+
+    db_settings = connection.settings_dict
+    base_conn_info = {
+        "host": db_settings.get("HOST") or "127.0.0.1",
+        "port": int(db_settings.get("PORT") or 5432),
+        "dbname": db_settings["NAME"],
+        "user": db_settings["USER"],
+        "password": db_settings.get("PASSWORD") or "",
+        "sslmode": "disable",
+        "connect_timeout": 10,
+    }
+
+    rollback_db_name = "sosp_atomic_rollback_probe"
+    admin_conn_info = {**base_conn_info, "dbname": "postgres"}
+
+    with psycopg.connect(**admin_conn_info, autocommit=True) as admin_conn:
+        with admin_conn.cursor() as admin_cur:
+            admin_cur.execute(f"DROP DATABASE IF EXISTS {rollback_db_name};")
+            admin_cur.execute(f"CREATE DATABASE {rollback_db_name};")
+
+    try:
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        sub_env = os.environ.copy()
+        sub_env.update(
+            {
+                "DJANGO_SETTINGS_MODULE": "config.settings.test",
+                "DB_ENGINE": "postgresql",
+                "DB_HOST": str(base_conn_info["host"]),
+                "DB_PORT": str(base_conn_info["port"]),
+                "DB_NAME": rollback_db_name,
+                "DB_USER": str(base_conn_info["user"]),
+                "DB_PASSWORD": str(base_conn_info["password"]),
+                "DB_SSLMODE": "disable",
+            }
+        )
+
+        # Fase 1: Executa migrate com falha injetada APÓS o DDL de accounts.0001_initial e ANTES do record_applied
+        fail_probe_code = """
+import django
+django.setup()
+from django.core.management import call_command
+from django.db import connection
+from django.db.migrations.recorder import MigrationRecorder
+from scripts.preflight_schema_inspection import SOSP_EXPECTED_TABLES
+
+orig_record_applied = MigrationRecorder.record_applied
+
+def fail_before_record_accounts_0001(self, app, name):
+    if app == "accounts" and name == "0001_initial":
+        with self.connection.cursor() as cur:
+            cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
+            in_tx_tables = {r[0] for r in cur.fetchall()}
+            sosp_in_tx = in_tx_tables.intersection(SOSP_EXPECTED_TABLES)
+            assert len(sosp_in_tx) == 36, f"Esperadas 36 tabelas SOSP na transação ativa antes do erro, encontradas {len(sosp_in_tx)}"
+            print(f"IN_TX_BEFORE_FAILURE_SOSP_TABLES={len(sosp_in_tx)}")
+        raise RuntimeError("FALHA_CONTROLADA_APOS_DDL_ANTES_DE_RECORD_APPLIED")
+    return orig_record_applied(self, app, name)
+
+MigrationRecorder.record_applied = fail_before_record_accounts_0001
+
+failed_as_expected = False
+try:
+    call_command("migrate", "accounts", "0001_initial", interactive=False, verbosity=0)
+except RuntimeError as exc:
+    if "FALHA_CONTROLADA_APOS_DDL_ANTES_DE_RECORD_APPLIED" in str(exc):
+        failed_as_expected = True
+    else:
+        raise
+
+assert failed_as_expected is True, "A falha controlada deveria ter interrompido accounts.0001_initial"
+print("CONTROLLED_FAILURE_TRIGGERED_OK")
+"""
+        proc_fail = subprocess.run(
+            [sys.executable, "-c", fail_probe_code],
+            cwd=backend_dir,
+            env=sub_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc_fail.returncode == 0, f"Erro inesperado na Fase 1: STDOUT={proc_fail.stdout}\nSTDERR={proc_fail.stderr}"
+        assert "IN_TX_BEFORE_FAILURE_SOSP_TABLES=36" in proc_fail.stdout
+        assert "CONTROLLED_FAILURE_TRIGGERED_OK" in proc_fail.stdout
+
+        # Fase 2: Verifica externamente no banco que o ROLLBACK reverteu todas as 36 tabelas SOSP, 2 views e registros de migration
+        probe_conn_info = {**base_conn_info, "dbname": rollback_db_name}
+        with psycopg.connect(**probe_conn_info, autocommit=True) as verify_conn:
+            with verify_conn.cursor() as cur:
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
+                tables_after_rollback = [r[0] for r in cur.fetchall()]
+                sosp_remaining = [t for t in tables_after_rollback if t in SOSP_EXPECTED_TABLES]
+                assert sosp_remaining == [], (
+                    f"Rollback falhou! Tabelas SOSP permaneceram após falha em accounts.0001_initial: {sosp_remaining}"
+                )
+
+                cur.execute("SELECT viewname FROM pg_views WHERE schemaname = 'public' ORDER BY viewname;")
+                views_after_rollback = [r[0] for r in cur.fetchall()]
+                assert views_after_rollback == [], (
+                    f"Rollback falhou! Views permaneceram após falha: {views_after_rollback}"
+                )
+
+                if "django_migrations" in tables_after_rollback:
+                    cur.execute("SELECT app, name FROM django_migrations;")
+                    recorded_migs = cur.fetchall()
+                    assert recorded_migs == [], (
+                        f"Nenhuma migration deveria constar em django_migrations após rollback, encontrado: {recorded_migs}"
+                    )
+
+        # Fase 3: Repete a instalação normal no mesmo banco e valida 14 migrations, 38 tabelas, 2 views, RLS e makemigrations --check
+        normal_install_code = """
+import django
+django.setup()
+from django.core.management import call_command
+
+call_command("migrate", interactive=False, verbosity=0)
+call_command("makemigrations", check=True, dry_run=True, verbosity=0)
+print("CLEAN_REINSTALL_AND_MAKEMIGRATIONS_CHECK_OK")
+"""
+        proc_ok = subprocess.run(
+            [sys.executable, "-c", normal_install_code],
+            cwd=backend_dir,
+            env=sub_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc_ok.returncode == 0, f"Erro na Fase 3 (reinstalação limpa): STDOUT={proc_ok.stdout}\nSTDERR={proc_ok.stderr}"
+        assert "CLEAN_REINSTALL_AND_MAKEMIGRATIONS_CHECK_OK" in proc_ok.stdout
+
+        with psycopg.connect(**probe_conn_info, autocommit=True) as verify_conn:
+            with verify_conn.cursor() as cur:
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
+                final_tables = {r[0] for r in cur.fetchall()}
+                assert len(final_tables) == 38
+                assert SOSP_EXPECTED_TABLES.issubset(final_tables)
+                assert DJANGO_CORE_TABLES.issubset(final_tables)
+
+                cur.execute("SELECT viewname FROM pg_views WHERE schemaname = 'public';")
+                final_views = {r[0] for r in cur.fetchall()}
+                assert final_views == set(SOSP_EXPECTED_VIEWS)
+
+                cur.execute(
+                    """
+                    SELECT count(*)
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true;
+                    """
+                )
+                assert cur.fetchone()[0] == 36
+
+                cur.execute("SELECT app, name FROM django_migrations;")
+                final_migs = cur.fetchall()
+                assert len(final_migs) == 14
+                assert set(final_migs) == set(EXPECTED_BASELINE_MIGRATIONS)
+    finally:
+        with psycopg.connect(**admin_conn_info, autocommit=True) as admin_conn:
+            with admin_conn.cursor() as admin_cur:
+                admin_cur.execute(
+                    """
+                    SELECT pg_terminate_backend(pid)
+                    FROM pg_stat_activity
+                    WHERE datname = %s AND pid <> pg_backend_pid();
+                    """,
+                    (rollback_db_name,),
+                )
+                admin_cur.execute(f"DROP DATABASE IF EXISTS {rollback_db_name};")
+
+
+
