@@ -95,6 +95,31 @@ def test_tcp_port(host: str, port: int, timeout_sec: int = 5) -> bool:
         return False
 
 
+def enter_verified_readonly_transaction(cur) -> str:
+    """
+    Inicia explicitamente uma transação 'BEGIN READ ONLY' e verifica que
+    'SHOW transaction_read_only' retorna 'on' dentro da transação efetiva.
+    Não depende de parâmetros de inicialização (options) que poolers possam ignorar.
+    """
+    cur.execute("BEGIN READ ONLY;")
+    cur.execute("SHOW transaction_read_only;")
+    row = cur.fetchone()
+    tx_ro = row[0] if row else None
+    if tx_ro != "on":
+        raise RuntimeError(
+            f"Violação de segurança transacional: esperado transaction_read_only='on', obtido '{tx_ro}'."
+        )
+    return tx_ro
+
+
+def safe_rollback(cur) -> None:
+    """Encerra a transação explicitamente com ROLLBACK, ignorando erros de conexão já fechada."""
+    try:
+        cur.execute("ROLLBACK;")
+    except Exception:
+        pass
+
+
 def test_postgresql_handshake(
     host: str,
     port: int,
@@ -104,8 +129,8 @@ def test_postgresql_handshake(
     sslmode: str,
     timeout_sec: int = 8,
 ) -> bool:
-    """Testa handshake SSL e autenticação com o PostgreSQL via psycopg 3."""
-    print(f"[2/3] Testando handshake SSL (sslmode='{sslmode}') e autenticação...")
+    """Testa handshake SSL, autenticação e transação efetiva READ ONLY com o PostgreSQL via psycopg 3."""
+    print(f"[2/3] Testando handshake SSL (sslmode='{sslmode}'), autenticação e transação READ ONLY...")
     try:
         import psycopg
     except ImportError:
@@ -123,22 +148,30 @@ def test_postgresql_handshake(
     }
 
     try:
-        with psycopg.connect(**conn_info) as conn:
+        with psycopg.connect(**conn_info, autocommit=True) as conn:
             with conn.cursor() as cur:
-                print("  ✓ Autenticação e handshake SSL bem-sucedidos!")
-                print("[3/3] Coletando metadados seguros da instância...")
-                cur.execute("SELECT version();")
-                pg_version = cur.fetchone()[0]
-                cur.execute("SELECT current_database(), current_user;")
-                db_name, cur_user = cur.fetchone()
-                cur.execute("SELECT pg_is_in_recovery();")
-                in_recovery = cur.fetchone()[0]
+                try:
+                    tx_ro = enter_verified_readonly_transaction(cur)
+                    print(
+                        f"  ✓ Autenticação, handshake SSL e transação SOMENTE LEITURA "
+                        f"(transaction_read_only={tx_ro}) verificados!"
+                    )
+                    print("[3/3] Coletando metadados seguros da instância...")
+                    cur.execute("SELECT version();")
+                    pg_version = cur.fetchone()[0]
+                    cur.execute("SELECT current_database(), current_user;")
+                    db_name, cur_user = cur.fetchone()
+                    cur.execute("SELECT pg_is_in_recovery();")
+                    in_recovery = cur.fetchone()[0]
 
-                print(f"  - Banco Conectado: {db_name}")
-                print(f"  - Usuário Ativo:   {cur_user}")
-                print(f"  - Modo Réplica:    {'Sim (Somente Leitura)' if in_recovery else 'Não (Primário / Escrita)'}")
-                print(f"  - Versão Motor:    {pg_version.split(',')[0]}")
-                return True
+                    print(f"  - Banco Conectado: {db_name}")
+                    print(f"  - Usuário Ativo:   {cur_user}")
+                    print(f"  - Transação Ativa: READ ONLY (transaction_read_only={tx_ro})")
+                    print(f"  - Modo Réplica:    {'Sim (Somente Leitura)' if in_recovery else 'Não (Primário / Escrita)'}")
+                    print(f"  - Versão Motor:    {pg_version.split(',')[0]}")
+                    return True
+                finally:
+                    safe_rollback(cur)
     except psycopg.OperationalError as e:
         # Sanitiza a mensagem para não expor senha se vier incluída
         err_msg = str(e)
@@ -147,7 +180,7 @@ def test_postgresql_handshake(
         print(f"  ✗ Falha operacional ao conectar ao PostgreSQL: {err_msg}")
         return False
     except Exception as e:
-        print(f"  ✗ Erro inesperado durante handshake: {type(e).__name__}")
+        print(f"  ✗ Erro durante handshake/verificação somente leitura: {type(e).__name__}: {e}")
         return False
 
 

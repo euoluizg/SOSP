@@ -818,3 +818,176 @@ def test_10_views_security_invoker_and_rls_enabled():
         rls_enabled_count = cur.fetchone()[0]
         assert rls_enabled_count == 36, f"Esperadas 36 tabelas com RLS ativo, encontradas {rls_enabled_count}"
 
+
+def test_11_preflight_readonly_transaction_blocks_ddl_and_protects_migrate_plan():
+    """
+    11. Regressão de segurança de pré-voo em PostgreSQL 17 real:
+    - Transação explícita BEGIN READ ONLY com autocommit=True e sem depender de options de inicialização;
+    - Confirma transaction_read_only = 'on' dentro da transação ativa;
+    - Comprova bloqueio real de tentativa controlada de DDL (CREATE TABLE -> ReadOnlySqlTransaction);
+    - Comprova execução de test_postgresql_handshake, inspect_database e run_verified_readonly_migrate_plan
+      em banco PostgreSQL descartável limpo sem criar tabelas, sem criar django_migrations e sem escritas.
+    """
+    import psycopg
+    from django.db import InternalError, connections, transaction
+    from scripts.preflight_connectivity import (
+        enter_verified_readonly_transaction as enter_ro_conn,
+        safe_rollback as safe_rollback_conn,
+        test_postgresql_handshake,
+    )
+    from scripts.preflight_schema_inspection import (
+        enter_verified_readonly_transaction as enter_ro_schema,
+        inspect_database,
+        run_verified_readonly_migrate_plan,
+        safe_rollback as safe_rollback_schema,
+    )
+
+    db_settings = connection.settings_dict
+    base_conn_info = {
+        "host": db_settings.get("HOST") or "127.0.0.1",
+        "port": int(db_settings.get("PORT") or 5432),
+        "dbname": db_settings["NAME"],
+        "user": db_settings["USER"],
+        "password": db_settings.get("PASSWORD") or "",
+        "sslmode": "disable",
+        "connect_timeout": 10,
+    }
+
+    # Parte A: Conexão Psycopg direta com autocommit=True e sem options (simulando Session Pooler)
+    with psycopg.connect(**base_conn_info, autocommit=True) as raw_conn:
+        with raw_conn.cursor() as cur:
+            cur.execute("SHOW default_transaction_read_only;")
+            assert cur.fetchone()[0] == "off"
+
+            try:
+                tx_ro = enter_ro_conn(cur)
+                assert tx_ro == "on"
+
+                cur.execute("SHOW transaction_read_only;")
+                assert cur.fetchone()[0] == "on"
+
+                # Tentativa controlada de DDL dentro da transação READ ONLY deve ser bloqueada pelo PostgreSQL
+                with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+                    cur.execute("CREATE TABLE sosp_readonly_probe_should_fail (id integer);")
+            finally:
+                safe_rollback_conn(cur)
+
+            # Garante que a tabela não foi criada após o ROLLBACK
+            cur.execute(
+                "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'sosp_readonly_probe_should_fail';"
+            )
+            assert cur.fetchone()[0] == 0
+
+            # Também valida enter_ro_schema + safe_rollback_schema
+            try:
+                assert enter_ro_schema(cur) == "on"
+            finally:
+                safe_rollback_schema(cur)
+
+    # Parte B: Banco PostgreSQL descartável limpo (0 tabelas) para provar ausência de escrita no pré-voo e no migrate --plan
+    empty_db_name = "sosp_preflight_readonly_empty_probe"
+    admin_conn_info = {**base_conn_info, "dbname": "postgres"}
+
+    with psycopg.connect(**admin_conn_info, autocommit=True) as admin_conn:
+        with admin_conn.cursor() as admin_cur:
+            admin_cur.execute(f"DROP DATABASE IF EXISTS {empty_db_name};")
+            admin_cur.execute(f"CREATE DATABASE {empty_db_name};")
+
+    try:
+        empty_conn_info = {
+            **base_conn_info,
+            "dbname": empty_db_name,
+            # Mesmo se options for passado, os scripts não dependem dele e o removem
+            "options": "-c default_transaction_read_only=on",
+        }
+
+        assert test_postgresql_handshake(
+            host=empty_conn_info["host"],
+            port=empty_conn_info["port"],
+            dbname=empty_conn_info["dbname"],
+            user=empty_conn_info["user"],
+            password=empty_conn_info["password"],
+            sslmode=empty_conn_info["sslmode"],
+            timeout_sec=empty_conn_info["connect_timeout"],
+        ) is True
+        assert inspect_database(empty_conn_info) == 0
+
+        # Executa o planejamento real via run_verified_readonly_migrate_plan em processo isolado
+        # (garantindo transação top-level real com transaction.atomic() + SET TRANSACTION READ ONLY)
+        import os
+        import subprocess
+        import sys
+
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        sub_env = os.environ.copy()
+        sub_env.update(
+            {
+                "DJANGO_SETTINGS_MODULE": "config.settings.test",
+                "DB_ENGINE": "postgresql",
+                "DB_HOST": str(base_conn_info["host"]),
+                "DB_PORT": str(base_conn_info["port"]),
+                "DB_NAME": empty_db_name,
+                "DB_USER": str(base_conn_info["user"]),
+                "DB_PASSWORD": str(base_conn_info["password"]),
+                "DB_SSLMODE": "disable",
+            }
+        )
+        probe_code = """
+import django
+django.setup()
+from django.db import InternalError, connection, transaction
+from scripts.preflight_schema_inspection import run_verified_readonly_migrate_plan
+
+# 1. Comprova que dentro de transaction.atomic() + SET TRANSACTION READ ONLY no Django,
+# qualquer tentativa de CREATE TABLE é bloqueada pelo PostgreSQL
+blocked = False
+try:
+    with transaction.atomic(using="default"):
+        with connection.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY;")
+            cur.execute("SHOW transaction_read_only;")
+            assert cur.fetchone()[0] == "on"
+            cur.execute("CREATE TABLE django_readonly_probe_should_fail (id integer);")
+except InternalError:
+    blocked = True
+
+assert blocked is True, "CREATE TABLE deveria ter sido bloqueado em SET TRANSACTION READ ONLY"
+
+# 2. Executa run_verified_readonly_migrate_plan
+tx_ro = run_verified_readonly_migrate_plan(database="default", require_ssl=False)
+assert tx_ro == "on", f"Esperado on, obtido {tx_ro}"
+print("SUBPROCESS_READONLY_PLAN_OK")
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", probe_code],
+            cwd=backend_dir,
+            env=sub_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, f"Falha no subprocesso de migrate --plan: STDOUT={proc.stdout}\nSTDERR={proc.stderr}"
+        assert "SUBPROCESS_READONLY_PLAN_OK" in proc.stdout
+        assert "accounts.0001_initial" in proc.stdout
+        assert "search.0002_align_orm_state_with_schema" in proc.stdout
+
+        # Verifica no banco descartável que absolutamente nenhuma tabela ou django_migrations foi criada
+        with psycopg.connect(**{**base_conn_info, "dbname": empty_db_name}, autocommit=True) as verify_conn:
+            with verify_conn.cursor() as verify_cur:
+                verify_cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
+                remaining_tables = [r[0] for r in verify_cur.fetchall()]
+                assert remaining_tables == [], f"Nenhuma tabela deveria existir após pré-voo/plan, encontradas: {remaining_tables}"
+    finally:
+        with psycopg.connect(**admin_conn_info, autocommit=True) as admin_conn:
+            with admin_conn.cursor() as admin_cur:
+                admin_cur.execute(
+                    """
+                    SELECT pg_terminate_backend(pid)
+                    FROM pg_stat_activity
+                    WHERE datname = %s AND pid <> pg_backend_pid();
+                    """,
+                    (empty_db_name,),
+                )
+                admin_cur.execute(f"DROP DATABASE IF EXISTS {empty_db_name};")
+
+
