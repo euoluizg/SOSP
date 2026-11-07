@@ -452,3 +452,47 @@ def test_run_verified_readonly_migrate_plan_rejects_sqlite_fallback(monkeypatch)
     with pytest.raises(RuntimeError, match="ENGINE esperado 'django.db.backends.postgresql'"):
         run_verified_readonly_migrate_plan(database="default", require_ssl=False)
 
+
+def test_prepare_baseline_sql_for_django_transaction_strips_outer_begin_commit_safely():
+    """
+    Valida que prepare_baseline_sql_for_django_transaction remove exclusivamente
+    os delimitadores externos BEGIN; e COMMIT; de baseline_0001_schema.sql,
+    preservando 100% do DDL das 36 tabelas, 2 views, funções PL/pgSQL e RLS,
+    e rejeita delimitadores desbalanceados ou COMMIT embutido no meio do DDL.
+    """
+    import importlib
+    from pathlib import Path
+
+    mig_0001 = importlib.import_module("apps.accounts.migrations.0001_initial")
+    prepare_fn = mig_0001.prepare_baseline_sql_for_django_transaction
+    assert getattr(mig_0001.Migration, "atomic", True) is True
+
+    sql_path = Path(__file__).resolve().parent.parent / "sql" / "baseline_0001_schema.sql"
+    raw_sql = sql_path.read_text(encoding="utf-8")
+
+    assert "\nBEGIN;\n" in raw_sql
+    assert "COMMIT;" in raw_sql
+
+    prepared_sql = prepare_fn(raw_sql)
+    assert "\nBEGIN;\n" not in prepared_sql
+    assert "COMMIT;" not in prepared_sql
+
+    # Confirma que todas as 36 tabelas, 2 views e corpo PL/pgSQL (BEGIN ... END;) permanecem intactos
+    assert "CREATE OR REPLACE FUNCTION setUpdatedAt()" in prepared_sql
+    assert "NEW.updatedAt = now();" in prepared_sql
+    assert "CREATE TABLE accountsGender" in prepared_sql
+    assert "ALTER TABLE auditDataSubjectRequest ENABLE ROW LEVEL SECURITY;" in prepared_sql
+
+    # Rejeita delimitadores externos desbalanceados
+    with pytest.raises(RuntimeError, match="Delimitadores transacionais externos desbalanceados"):
+        prepare_fn("BEGIN;\nCREATE TABLE t (id int);\n")
+    with pytest.raises(RuntimeError, match="Delimitadores transacionais externos desbalanceados"):
+        prepare_fn("CREATE TABLE t (id int);\nCOMMIT;\n")
+
+    # Rejeita COMMIT; ou ROLLBACK; embutido no meio do DDL
+    with pytest.raises(RuntimeError, match="Comando transacional embutido proibido"):
+        prepare_fn("BEGIN;\nCREATE TABLE t1 (id int);\nCOMMIT;\nCREATE TABLE t2 (id int);\nCOMMIT;\n")
+    with pytest.raises(RuntimeError, match="Comando transacional embutido proibido"):
+        prepare_fn("BEGIN;\nCREATE TABLE t1 (id int);\nROLLBACK;\nCOMMIT;\n")
+
+

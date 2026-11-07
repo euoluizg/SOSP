@@ -1,12 +1,84 @@
 from pathlib import Path
+import re
+
+
+def prepare_baseline_sql_for_django_transaction(raw_sql: str) -> str:
+    """
+    Remove de forma estritamente validada os delimitadores transacionais externos
+    ('BEGIN;' no início e 'COMMIT;' no final) do arquivo baseline_0001_schema.sql,
+    preservando integralmente todo o conteúdo DDL intermediário para que a execução
+    seja controlada exclusivamente pela transação atômica do MigrationExecutor do Django.
+    """
+    lines = raw_sql.splitlines(keepends=True)
+
+    first_stmt_idx = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("--"):
+            first_stmt_idx = idx
+            break
+
+    last_stmt_idx = None
+    for idx in range(len(lines) - 1, -1, -1):
+        stripped = lines[idx].strip()
+        if stripped and not stripped.startswith("--"):
+            last_stmt_idx = idx
+            break
+
+    if first_stmt_idx is None or last_stmt_idx is None:
+        raise RuntimeError("Arquivo baseline_0001_schema.sql está vazio ou sem instruções DDL.")
+
+    first_token = lines[first_stmt_idx].strip().upper()
+    last_token = lines[last_stmt_idx].strip().upper()
+
+    has_outer_begin = first_token == "BEGIN;"
+    has_outer_commit = last_token == "COMMIT;"
+
+    if has_outer_begin != has_outer_commit:
+        raise RuntimeError(
+            f"Delimitadores transacionais externos desbalanceados em baseline_0001_schema.sql: "
+            f"início={lines[first_stmt_idx].strip()!r}, fim={lines[last_stmt_idx].strip()!r}."
+        )
+
+    if has_outer_begin and has_outer_commit:
+        # Preserva comentários iniciais, todo o corpo DDL intermediário e quebras finais sem BEGIN;/COMMIT;
+        expected_middle = "".join(lines[:first_stmt_idx] + lines[first_stmt_idx + 1 : last_stmt_idx] + lines[last_stmt_idx + 1 :])
+        prepared_sql = expected_middle
+    else:
+        prepared_sql = raw_sql
+
+    # Valida que fora de corpos PL/pgSQL ($$ ... $$) não resta nenhum comando de controle transacional
+    sql_without_plpgsql_bodies = re.sub(r"\$\$.*?\$\$", "", prepared_sql, flags=re.DOTALL)
+    forbidden_tx_match = re.search(
+        r"(?im)^\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE\s+SAVEPOINT|START\s+TRANSACTION|END)\s*;",
+        sql_without_plpgsql_bodies,
+    )
+    if forbidden_tx_match:
+        raise RuntimeError(
+            f"Comando transacional embutido proibido detectado no DDL da baseline: {forbidden_tx_match.group(0).strip()!r}"
+        )
+
+    return prepared_sql
+
 
 def apply_baseline_sql(apps, schema_editor):
     if schema_editor.connection.vendor == "postgresql":
+        if not schema_editor.connection.in_atomic_block:
+            raise RuntimeError(
+                "Violação de atomicidade: a baseline PostgreSQL deve ser executada dentro de uma transação atômica do Django."
+            )
         sql_file = Path(__file__).resolve().parent.parent.parent.parent / "common" / "sql" / "baseline_0001_schema.sql"
         with open(sql_file, "r", encoding="utf-8") as f:
             sql_content = f.read()
+        prepared_sql = prepare_baseline_sql_for_django_transaction(sql_content)
         with schema_editor.connection.cursor() as cursor:
-            cursor.cursor.execute(sql_content)
+            cursor.cursor.execute(prepared_sql)
+            cursor.cursor.execute("SELECT txid_current_if_assigned();")
+            active_txid = cursor.cursor.fetchone()[0]
+            if active_txid is None:
+                raise RuntimeError(
+                    "Violação transacional: o DDL da baseline sofreu COMMIT antecipado fora do controle do Django!"
+                )
     else:
         for model_name in ["Gender", "InternalUser", "Citizen", "Session", "LoginAttempt", "PasswordReset"]:
             schema_editor.create_model(apps.get_model("accounts", model_name))
