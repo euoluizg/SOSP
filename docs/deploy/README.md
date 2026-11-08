@@ -34,6 +34,7 @@ flowchart LR
 - **Build Command:** `./render-build.sh` (executável: `pip install -r requirements.txt`, `manage.py check`, `collectstatic`)
 - **Start Command:** `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile -`
 - **Health Check Path:** `/api/v1/health` (resposta esperada: HTTP 200 `{"status": "healthy", ...}`)
+- **Plano:** `free` (staging/homologação, sem custo e sem cartão). Efeito colateral: o serviço hiberna após ~15 min sem tráfego e a primeira requisição após a hibernação sofre *cold start* de ~30–60 s. Para uso contínuo de produção, avaliar plano pago em tarefa própria.
 
 ### 2.2 Variáveis de Ambiente no Render
 
