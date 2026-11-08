@@ -43,8 +43,8 @@ flowchart LR
 | `DJANGO_SETTINGS_MODULE` | `config.settings.production` | Não | Módulo de configurações seguras |
 | `DEBUG` | `false` | Não | Desativa depuração em produção |
 | `ALLOWED_HOSTS` | `sosp-backend-staging.onrender.com,localhost,127.0.0.1` | Não | Hosts permitidos |
-| `CORS_ALLOWED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev,https://portal.sosp.al.gov.br` | Não | Origens dos Cloudflare Workers |
-| `CSRF_TRUSTED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev,https://portal.sosp.al.gov.br` | Não | Origens confiáveis para CSRF |
+| `CORS_ALLOWED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev` | Não | Origens dos Cloudflare Workers de staging (produção não é permitida aqui) |
+| `CSRF_TRUSTED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev` | Não | Origens confiáveis para CSRF em staging (produção não é permitida aqui) |
 | `REPOSITORY_BACKEND` | `orm` | Não | Persistência real PostgreSQL via Django ORM |
 | `DB_ENGINE` | `postgresql` | Não | Engine de banco de dados |
 | `DB_HOST` | `aws-1-sa-east-1.pooler.supabase.com` | Não | Pooler Session do Supabase |
