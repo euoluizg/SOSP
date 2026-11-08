@@ -5,17 +5,20 @@ from .services import GuidanceService
 
 class ServiceGuidanceView(APIView):
     def get(self, request, service_id):
-        result = GuidanceService.get_guidance(service_id)
+        citizen_id = str(request.user.id) if request.user and getattr(request.user, "is_authenticated", False) else "citizen-001"
+        result = GuidanceService.get_guidance(service_id, citizen_id=citizen_id)
         return Response(result, status=status.HTTP_200_OK)
 
     def put(self, request, service_id):
+        citizen_id = str(request.user.id) if request.user and getattr(request.user, "is_authenticated", False) else "citizen-001"
         checked_items = request.data.get("checkedItems", [])
-        result = GuidanceService.update_checklist(service_id, checked_items)
+        result = GuidanceService.update_checklist(service_id, checked_items, citizen_id=citizen_id)
         return Response(result, status=status.HTTP_200_OK)
 
 class ServiceGuidancePdfRequestView(APIView):
     def post(self, request, service_id):
-        result = GuidanceService.request_pdf(service_id)
+        citizen_id = str(request.user.id) if request.user and getattr(request.user, "is_authenticated", False) else "citizen-001"
+        result = GuidanceService.request_pdf(service_id, citizen_id=citizen_id)
         return Response(result, status=status.HTTP_202_ACCEPTED)
 
 class GuidancePdfStatusView(APIView):

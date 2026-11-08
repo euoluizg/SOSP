@@ -33,6 +33,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "common.security.db_context.SospDatabaseSecurityContextMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -111,6 +112,22 @@ if DB_ENGINE == "postgresql":
         "options": f"-c statement_timeout={db_statement_timeout}",
     }
 
+    db_sslrootcert = os.environ.get("DB_SSLROOTCERT") or os.environ.get("PGSSLROOTCERT")
+    if not db_sslrootcert and db_sslmode == "verify-full":
+        for candidate in [
+            os.path.expanduser("~/.sosp-certificates/supabase-ca.crt"),
+            os.path.expanduser("~/.sosp-certs/prod-ca-2021.crt"),
+            "/etc/secrets/supabase-ca.crt",  # Render Secret Files mount path
+            "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu/Render system CA bundle
+            "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/CentOS system CA bundle
+        ]:
+            if os.path.isfile(candidate):
+                db_sslrootcert = candidate
+                break
+
+    if db_sslrootcert:
+        db_options["sslrootcert"] = db_sslrootcert
+
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -149,6 +166,14 @@ if REPOSITORY_BACKEND not in ("memory", "orm"):
         "Valores permitidos: 'memory' (padrão) ou 'orm'."
     )
 
+# Chave HMAC exclusiva para autenticação de contexto RLS no PostgreSQL (ADR-003, Etapa 4D.2)
+DB_HMAC_SECRET_KEY = os.environ.get("DB_HMAC_SECRET_KEY", "")
+if not DB_HMAC_SECRET_KEY and REPOSITORY_BACKEND == "orm":
+    raise ImproperlyConfigured(
+        "DB_HMAC_SECRET_KEY não foi configurada. Em modo 'orm', uma chave HMAC "
+        "de no mínimo 32 caracteres é obrigatória para proteção de contexto RLS no PostgreSQL."
+    )
+
 # Autenticação e Hasher Argon2id (RF-01, RF-02, ADR-003)
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.Argon2PasswordHasher",
@@ -167,6 +192,9 @@ STATIC_URL = "/static/"
 
 # Django REST Framework & RFC 7807 (Problem Details)
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "common.security.authentication.SospTokenAuthentication",
+    ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],

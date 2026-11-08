@@ -28,8 +28,19 @@ class AppointmentCreateListView(APIView):
         serializer = CreateAppointmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+
+        if request.user and getattr(request.user, "is_authenticated", False):
+            # Cidadão autenticado: a identidade DEVE ser a do próprio usuário (anti-spoofing)
+            if getattr(request.user, "role", "citizen") == "citizen":
+                citizen_id = str(request.user.id)
+            else:
+                # Servidor ou admin agendando para terceiro: usa citizenId do payload
+                citizen_id = str(data.get("citizenId") or request.user.id)
+        else:
+            citizen_id = data.get("citizenId", "citizen-001")
+
         appt = SchedulingService.create_appointment(
-            citizen_id=data.get("citizenId", "citizen-001"),
+            citizen_id=citizen_id,
             service_id=data["serviceId"],
             unit_id=data["unitId"],
             scheduled_date=data["scheduledDate"],

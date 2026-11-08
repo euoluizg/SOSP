@@ -1,6 +1,7 @@
 import math
 from typing import Any, Dict, List, Optional
 from apps.catalog.selectors import get_all_active_services
+from .repositories import search_repository
 
 class SearchService:
     @staticmethod
@@ -17,14 +18,18 @@ class SearchService:
 
         if query:
             q = query.lower().strip()
+            synonyms = search_repository.get_synonyms(q)
+            search_terms = [q] + [s.lower() for s in synonyms]
+
             filtered = [
                 s for s in filtered
-                if (
-                    q in s.get("name", "").lower()
-                    or q in s.get("summary", "").lower()
-                    or q in s.get("description", "").lower()
-                    or q in s.get("agencyAcronym", "").lower()
-                    or (q == "tirar rg" and s.get("id") == "servico-emitir-rg")
+                if any(
+                    term in s.get("name", "").lower()
+                    or term in s.get("summary", "").lower()
+                    or term in s.get("description", "").lower()
+                    or term in s.get("agencyAcronym", "").lower()
+                    or (term == "tirar rg" and s.get("id") == "servico-emitir-rg")
+                    for term in search_terms
                 )
             ]
 
@@ -40,6 +45,14 @@ class SearchService:
         start = (page - 1) * page_size
         items = filtered[start : start + page_size]
 
+        # Log anônimo de busca (ADR-001)
+        if query:
+            search_repository.log_query(
+                term=query,
+                filters={"category": category, "channel": channel, "city": city},
+                result_count=total,
+            )
+
         return {
             "items": items,
             "total": total,
@@ -47,4 +60,3 @@ class SearchService:
             "pageSize": page_size,
             "totalPages": total_pages,
         }
-

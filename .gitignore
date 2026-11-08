@@ -30,6 +30,8 @@ htmlcov/
 node_modules/
 .next/
 out/
+.open-next/
+.wrangler/
 dist/
 build/
 .turbo/

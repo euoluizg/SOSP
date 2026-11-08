@@ -100,3 +100,29 @@ def test_login_lockout_after_5_failures():
     assert "bloqueado por 5 minutos" in resp.json()["detail"].lower()
     citizen_repository.reset_failed_attempts(test_cpf)
 
+def test_logout_and_server_side_session_revocation():
+    # 1. Login com emissão de token
+    resp_login = client.post(
+        "/api/v1/auth/login",
+        {"cpf": "11144477705", "password": "S0sp@2026!Fort3"},
+        format="json",
+    )
+    assert resp_login.status_code == 200
+    token = resp_login.json()["token"]
+
+    # 2. Requisição autenticada é aceita
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    resp_me_ok = client.get("/api/v1/citizens/me")
+    assert resp_me_ok.status_code == 200
+
+    # 3. Logout com revogação no servidor (accountsSession)
+    resp_logout = client.post("/api/v1/auth/logout")
+    assert resp_logout.status_code == 200
+    assert "revogada" in resp_logout.json()["message"].lower()
+
+    # 4. Tentar reutilizar o token revogado resulta em 401 Unauthorized
+    resp_me_revoked = client.get("/api/v1/citizens/me")
+    assert resp_me_revoked.status_code == 401
+    assert "revogada" in resp_me_revoked.json()["detail"].lower()
+    client.credentials()  # Limpa credenciais para os demais testes
+

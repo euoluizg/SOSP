@@ -1,8 +1,10 @@
 import re
 import datetime
+import hashlib
 from typing import Any, Dict, List, Tuple
 from django.contrib.auth.hashers import make_password, check_password
 from common.exceptions import ProblemDetailsException
+from common.security.authentication import generate_sosp_token
 from .repositories import citizen_repository
 
 def validate_cpf(cpf: str) -> bool:
@@ -62,6 +64,12 @@ def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
     if not re.search(r"[^A-Za-z0-9]", password):
         errors.append("A senha deve conter ao menos um caractere especial.")
     return len(errors) == 0, errors
+
+# Hash dummy pré-computado compatível com Argon2id para proteção contra timing attacks (OWASP)
+# Impede enumeração de CPFs medindo a latência da resposta (~50ms constante)
+DUMMY_ARGON2_HASH = (
+    "argon2$argon2id$v=19$m=102400,t=2,p=8$dXVpZGR1bW15c2FsdA$2q5L2+J54q7+O52+K52+K52+K52+K52+K52+K52+K54"
+)
 
 class AccountService:
     @staticmethod
@@ -152,8 +160,17 @@ class AccountService:
                 status_code=429,
             )
 
-        citizen = citizen_repository.get_by_cpf(clean_cpf)
-        if not citizen or not check_password(password, citizen.get("passwordHash", "")):
+        citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf)
+
+        # Mitigação contra Timing Attack (executa Argon2id mesmo quando CPF não existe)
+        target_hash = citizen.get("passwordHash") if citizen else DUMMY_ARGON2_HASH
+        pwd_valid = False
+        try:
+            pwd_valid = check_password(password, target_hash)
+        except Exception:
+            pwd_valid = False
+
+        if not citizen or not pwd_valid:
             attempts = citizen_repository.record_failed_attempt(clean_cpf)
             if attempts >= 5:
                 raise ProblemDetailsException(
@@ -167,10 +184,34 @@ class AccountService:
                 status_code=401,
             )
 
+        # Validação de status ativo (RN-40)
+        if not citizen.get("isActive", True):
+            raise ProblemDetailsException(
+                detail="Conta de cidadão desativada ou excluída.",
+                title="Conta Inativa",
+                status_code=403,
+            )
+
         # Login bem sucedido -> reseta contador
         citizen_repository.reset_failed_attempts(clean_cpf)
 
-        token = f"simulated-jwt-token-{citizen['id']}"
+        token = generate_sosp_token(
+            user_id=citizen["id"],
+            role=citizen.get("role", "citizen"),
+            agency_id=citizen.get("agencyId"),
+            cpf=clean_cpf,
+            full_name=citizen.get("fullName", ""),
+            email=citizen.get("email", ""),
+        )
+
+        # Registra sessão no servidor (accountsSession / RN-28)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        citizen_repository.create_session(
+            subject_type="citizen",
+            subject_id=citizen["id"],
+            token_hash=token_hash,
+        )
+
         return {
             "token": token,
             "tokenType": "Bearer",
@@ -187,7 +228,7 @@ class AccountService:
     @staticmethod
     def request_password_recovery(cpf: str) -> Dict[str, str]:
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        citizen = citizen_repository.get_by_cpf(clean_cpf)
+        citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf)
         if not citizen:
             # Retorna sucesso neutro para não expor existência de usuário (OWASP)
             return {"message": "Se o CPF estiver cadastrado, um código de verificação será enviado por e-mail."}
@@ -199,7 +240,7 @@ class AccountService:
     @staticmethod
     def reset_password(cpf: str, code: str, new_password: str) -> Dict[str, str]:
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        citizen = citizen_repository.get_by_cpf(clean_cpf)
+        citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf)
         if not citizen:
             raise ProblemDetailsException(detail="CPF não encontrado.", status_code=404)
 
@@ -220,5 +261,15 @@ class AccountService:
 
         citizen["passwordHash"] = make_password(new_password)
         citizen_repository.clear_recovery_code(clean_cpf)
+        # Revoga todas as sessões ativas no servidor (proteção de redefinição de credencial)
+        citizen_repository.revoke_all_sessions(citizen["id"])
         return {"message": "Senha redefinida com sucesso."}
+
+    @staticmethod
+    def logout_citizen(token: str) -> Dict[str, str]:
+        """Revoga a sessão ativamente no servidor (accountsSession)."""
+        if token:
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            citizen_repository.revoke_session(token_hash)
+        return {"message": "Sessão encerrada e revogada no servidor com sucesso."}
 
