@@ -120,3 +120,74 @@ jobs:
         run: |
           cd portal
           npm audit --audit-level=critical
+
+  postgresql-security-and-rls-gate:
+    name: "PostgreSQL 17+ RLS and Security Gate"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: "Checkout do Código"
+        uses: actions/checkout@v4
+
+      - name: "Configurar Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: "Instalar Dependências Backend"
+        run: |
+          pip install -r backend/requirements.txt psycopg2-binary psycopg
+
+      - name: "Executar Cenários de Segurança RLS e Identidade de Runtime"
+        env:
+          DB_HOST: "127.0.0.1"
+          DB_PORT: "5432"
+          DB_NAME: "postgres"
+          DB_USER: "postgres"
+          DB_PASSWORD: "ci_test_password"
+          PGPASSWORD: "ci_test_password"
+          DB_SSLMODE: "disable"
+          DB_HMAC_SECRET_KEY: "ci_dummy_hmac_secret_key_32bytes_ok"
+        run: |
+          # 1. Carrega extensões e cria roles de runtime de teste
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -c "
+            CREATE EXTENSION IF NOT EXISTS unaccent;
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+            DO \$\$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sosp_runtime_role') THEN
+                CREATE ROLE sosp_runtime_role NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sosp_runtime_app') THEN
+                CREATE ROLE sosp_runtime_app WITH LOGIN PASSWORD 'ci_runtime_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+              END IF;
+              GRANT sosp_runtime_role TO sosp_runtime_app;
+              GRANT USAGE ON SCHEMA public TO sosp_runtime_role;
+            END \$\$;
+          "
+          # 2. Carrega schema baseline
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -f docs/database/schema.sql
+
+          # 3. Configura contexto HMAC, segredo e políticas RLS
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -f scripts/security_audit/run_4d2_setup_security_context.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -c "SELECT sosp_security.set_hmac_secret('ci_dummy_hmac_secret_key_32bytes_ok');"
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -f scripts/security_audit/run_4d2_apply_minimum_grants.sql
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -f scripts/security_audit/run_4d2_apply_rls_policies.sql
+
+          # 4. Executa bateria automatizada de fronteira transacional, contexto HMAC e anti-replay
+          python scripts/security_audit/test_transaction_boundary_and_context.py

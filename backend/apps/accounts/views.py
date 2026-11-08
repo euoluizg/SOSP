@@ -30,7 +30,12 @@ class LoginView(APIView):
 
 class LogoutView(APIView):
     def post(self, request):
-        return Response({"message": "Logout realizado com sucesso."}, status=status.HTTP_200_OK)
+        auth_header = request.headers.get("Authorization", "")
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        result = AccountService.logout_citizen(token)
+        return Response(result, status=status.HTTP_200_OK)
 
 class PasswordRecoveryView(APIView):
     def post(self, request):
@@ -52,8 +57,11 @@ class PasswordResetView(APIView):
 
 class CitizenMeView(APIView):
     def get(self, request):
-        # Em ambiente simulado de desenvolvimento sem banco, retorna o perfil padrão
-        citizen = citizen_repository.get_by_id("citizen-001")
+        if request.user and getattr(request.user, "is_authenticated", False):
+            citizen_id = str(request.user.id)
+        else:
+            citizen_id = "citizen-001"
+        citizen = citizen_repository.get_by_id(citizen_id)
         if not citizen:
             raise ProblemDetailsException(detail="Perfil não encontrado.", status_code=404)
         safe_copy = dict(citizen)

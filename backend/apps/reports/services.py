@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from apps.scheduling.selectors import get_all_appointments
 from common.feature_flags import FEATURE_REPORTS_EXPORT
 from common.exceptions import ProblemDetailsException
+from .repositories import reports_repository
 
 class ReportsService:
     @staticmethod
@@ -28,15 +29,16 @@ class ReportsService:
         }
 
     @staticmethod
-    def create_export(export_type: str = "csv", filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def create_export(export_type: str = "csv", filters: Optional[Dict[str, Any]] = None, requested_by: str = "user-admin-01") -> Dict[str, Any]:
         if not FEATURE_REPORTS_EXPORT:
             raise ProblemDetailsException(detail="Exportação de relatórios desativada.", status_code=403)
 
-        return {
-            "exportId": f"exp-{int(datetime.datetime.now().timestamp())}",
-            "type": export_type,
-            "status": "ready",
-            "downloadUrl": f"/mock-storage/relatorio-agendamentos.{export_type}",
-            "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
+        return reports_repository.create_export(export_type=export_type, filters=filters, requested_by=requested_by)
 
+    @staticmethod
+    def get_export(export_id: str) -> Optional[Dict[str, Any]]:
+        return reports_repository.get_export(export_id)
+
+    @staticmethod
+    def list_exports() -> List[Dict[str, Any]]:
+        return reports_repository.list_exports()

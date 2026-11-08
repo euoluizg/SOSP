@@ -41,3 +41,13 @@ def test_open_question_endpoint():
     assert response.status_code == 201
     assert "protocolNumber" in response.json()
 
+@pytest.mark.django_db
+def test_health_check_endpoint():
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["version"] == "1.0.0"
+    assert "database" in data
+    assert data["database"]["status"] == "operational"
+

@@ -1,6 +1,11 @@
 from django.urls import path, re_path, include
+from common.health import HealthCheckView
 
 urlpatterns = [
+    # Health checks
+    re_path(r"^api/v1/health/?$", HealthCheckView.as_view(), name="health-check-v1"),
+    re_path(r"^health/?$", HealthCheckView.as_view(), name="health-check-root"),
+
     # Módulos SOSP — /api/v1/ (Aceita com ou sem barra final)
     re_path(r"^api/v1/auth/", include("apps.accounts.urls_auth")),
     re_path(r"^api/v1/citizens", include("apps.accounts.urls_citizens")),

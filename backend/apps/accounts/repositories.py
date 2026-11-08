@@ -52,6 +52,9 @@ class CitizenInMemoryRepository:
                 return c
         return None
 
+    def get_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        return self.get_by_cpf(cpf)
+
     def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         clean_email = email.strip().lower()
         for c in self._citizens.values():
@@ -115,6 +118,43 @@ class CitizenInMemoryRepository:
         clean_cpf = "".join(filter(str.isdigit, cpf))
         self._recovery_codes.pop(clean_cpf, None)
 
+    # --- Gestão de Sessões e Revogação (accountsSession) ---
+    def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
+        if not hasattr(self, "_sessions"):
+            self._sessions = {}
+        self._sessions[token_hash] = {
+            "subject_type": subject_type,
+            "subject_id": str(subject_id),
+            "token_hash": token_hash,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "expires_at": expires_at,
+            "revoked_at": None,
+        }
+
+    def is_session_revoked(self, token_hash: str) -> bool:
+        if not hasattr(self, "_sessions"):
+            return False
+        sess = self._sessions.get(token_hash)
+        if not sess:
+            return False
+        return sess.get("revoked_at") is not None
+
+    def revoke_session(self, token_hash: str) -> None:
+        if not hasattr(self, "_sessions"):
+            return
+        if token_hash in self._sessions:
+            self._sessions[token_hash]["revoked_at"] = datetime.datetime.now(datetime.timezone.utc)
+
+    def revoke_all_sessions(self, subject_id: str) -> None:
+        if not hasattr(self, "_sessions"):
+            return
+        now = datetime.datetime.now(datetime.timezone.utc)
+        sub_str = str(subject_id)
+        for s in self._sessions.values():
+            if s.get("subject_id") == sub_str:
+                s["revoked_at"] = now
+
 class CitizenDjangoORMRepository:
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
 
@@ -129,6 +169,65 @@ class CitizenDjangoORMRepository:
         c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
         return self._to_dict(c) if c else None
 
+    def get_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        """
+        Busca cidadão por CPF exclusivamente para autenticação sob RLS com princípio do menor privilégio.
+        1. Em PostgreSQL: Invoca exclusivamente a função cirúrgica sosp_security.authenticate_citizen_by_cpf (sem elevação de role).
+           PROIBIDO: Fallback silencioso para role 'server' ou 'admin'. Se a função estiver ausente, falha com 503 seguro.
+        2. Em SQLite (testes locais rápidos sem RLS): Consulta direta via ORM.
+        """
+        import logging
+        from .models import Citizen
+        from django.db import connection
+        from common.exceptions import ProblemDetailsException
+
+        logger = logging.getLogger(__name__)
+
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        if len(clean_cpf) != 11:
+            return None
+
+        # 1. Em PostgreSQL: Exclusivamente via função SECURITY DEFINER de menor privilégio
+        if connection.vendor == "postgresql":
+            try:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        "SELECT citizen_id, full_name, email, password_hash, is_active, blocked_until, login_attempts, role "
+                        "FROM sosp_security.authenticate_citizen_by_cpf(%s);",
+                        [clean_cpf]
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            "id": str(row[0]),
+                            "fullName": row[1],
+                            "cpf": clean_cpf,
+                            "email": row[2],
+                            "passwordHash": row[3],
+                            "isActive": row[4],
+                            "blockedUntil": row[5].isoformat() if row[5] else None,
+                            "loginAttempts": row[6] or 0,
+                            "role": row[7] or "citizen",
+                        }
+                    return None
+            except Exception as e:
+                logger.error(
+                    "FALHA DE SEGURANÇA: Função sosp_security.authenticate_citizen_by_cpf inacessível no PostgreSQL: %s. "
+                    "Fallback privilegiado (role='server') está PERMANENTEMENTE DESATIVADO por política de menor privilégio.",
+                    e
+                )
+                raise ProblemDetailsException(
+                    detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
+                    title="Serviço Indisponível",
+                    status_code=503,
+                )
+
+        # 2. Em SQLite (ambiente de teste local sem PostgreSQL / sem RLS)
+        c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).only(
+            "id", "cpf", "full_name", "email", "password_hash", "is_active", "blocked_until", "login_attempts"
+        ).first()
+        return self._to_dict(c) if c else None
+
     def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         from .models import Citizen
         c = Citizen.objects.filter(email__iexact=email.strip(), is_active=True, deleted_at__isnull=True).first()
@@ -136,6 +235,9 @@ class CitizenDjangoORMRepository:
 
     def save(self, data: Dict[str, Any]) -> Dict[str, Any]:
         from .models import Citizen, Gender
+        from django.db import IntegrityError
+        from common.exceptions import ProblemDetailsException
+
         clean_cpf = "".join(filter(str.isdigit, data["cpf"]))
         
         gender_id = data.get("genderId")
@@ -150,76 +252,93 @@ class CitizenDjangoORMRepository:
         if citizen_id:
             citizen = Citizen.objects.filter(id=citizen_id).first()
 
-        if not citizen:
-            citizen = Citizen(
-                cpf=clean_cpf,
-                full_name=data.get("fullName", "").strip(),
-                birth_date=data.get("birthDate"),
-                email=data.get("email", "").strip().lower(),
-                phone="".join(filter(str.isdigit, data.get("phone", ""))),
-                password_hash=data.get("passwordHash", ""),
-                password_salt=data.get("passwordSalt", "salt"),
-                gender=gender,
-                is_pcd=data.get("isPcd", False),
-                disability_description=data.get("pcdDetails") or data.get("disabilityDescription", ""),
-                mother_name=data.get("motherName", "").strip(),
-                father_name=data.get("fatherName", "").strip() or None,
-                zip_code="".join(filter(str.isdigit, data.get("zipCode", ""))),
-                street=data.get("street", "").strip(),
-                neighborhood=data.get("neighborhood", "").strip(),
-                city=data.get("city", "").strip(),
-                state=data.get("state", "").strip(),
-                address_number=str(data.get("addressNumber") or data.get("number", "S/N")).strip(),
-                address_complement=data.get("complement") or data.get("addressComplement", ""),
-                avatar_url=data.get("avatarUrl", ""),
-            )
-            citizen.save()
-        else:
-            if "fullName" in data: citizen.full_name = data["fullName"]
-            if "email" in data: citizen.email = data["email"].strip().lower()
-            if "phone" in data: citizen.phone = "".join(filter(str.isdigit, data["phone"]))
-            citizen.save()
+        try:
+            if not citizen:
+                citizen = Citizen(
+                    cpf=clean_cpf,
+                    full_name=data.get("fullName", "").strip(),
+                    birth_date=data.get("birthDate"),
+                    email=data.get("email", "").strip().lower(),
+                    phone="".join(filter(str.isdigit, data.get("phone", ""))),
+                    password_hash=data.get("passwordHash", ""),
+                    password_salt=data.get("passwordSalt", "salt"),
+                    gender=gender,
+                    is_pcd=data.get("isPcd", False),
+                    disability_description=data.get("pcdDetails") or data.get("disabilityDescription", ""),
+                    mother_name=data.get("motherName", "").strip(),
+                    father_name=data.get("fatherName", "").strip() or None,
+                    zip_code="".join(filter(str.isdigit, data.get("zipCode", ""))),
+                    street=data.get("street", "").strip(),
+                    neighborhood=data.get("neighborhood", "").strip(),
+                    city=data.get("city", "").strip(),
+                    state=data.get("state", "").strip(),
+                    address_number=str(data.get("addressNumber") or data.get("number", "S/N")).strip(),
+                    address_complement=data.get("complement") or data.get("addressComplement", ""),
+                    avatar_url=data.get("avatarUrl", ""),
+                )
+                citizen.save()
+            else:
+                if "fullName" in data: citizen.full_name = data["fullName"]
+                if "email" in data: citizen.email = data["email"].strip().lower()
+                if "phone" in data: citizen.phone = "".join(filter(str.isdigit, data["phone"]))
+                citizen.save()
+        except IntegrityError as e:
+            if "cpf" in str(e).lower() or "unique" in str(e).lower():
+                raise ProblemDetailsException(
+                    detail="Já existe uma conta cadastrada com este CPF.",
+                    title="CPF já cadastrado",
+                    status_code=409,
+                    errors=[{"field": "cpf", "message": "Já existe uma conta cadastrada com este CPF."}],
+                )
+            raise
 
         return self._to_dict(citizen)
 
     def record_failed_attempt(self, cpf: str) -> int:
-        from .models import Citizen, LoginAttempt
+        from .models import LoginAttempt
         from django.utils import timezone
+        import datetime
 
         clean_cpf = "".join(filter(str.isdigit, cpf))
         LoginAttempt.objects.create(cpf=clean_cpf, was_successful=False)
 
-        c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
-        if not c:
-            return 1
-
-        c.login_attempts += 1
-        if c.login_attempts >= 5:
-            c.blocked_until = timezone.now() + datetime.timedelta(minutes=5)
-        c.save(update_fields=["login_attempts", "blocked_until", "updated_at"])
-        return c.login_attempts
+        # Janela de 5 minutos (RN-29) sob RLS p_login_attempt_select (USING true)
+        window = timezone.now() - datetime.timedelta(minutes=5)
+        attempts = LoginAttempt.objects.filter(
+            cpf=clean_cpf,
+            was_successful=False,
+            attempted_at__gte=window
+        ).count()
+        return attempts
 
     def is_locked_out(self, cpf: str) -> tuple[bool, int]:
-        from .models import Citizen
+        from .models import LoginAttempt
         from django.utils import timezone
+        import datetime
 
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        c = Citizen.objects.filter(cpf=clean_cpf).first()
-        if not c or not c.blocked_until:
-            return False, 0
-        now = timezone.now()
-        if c.blocked_until > now:
-            remaining = int((c.blocked_until - now).total_seconds())
-            return True, remaining
-        c.login_attempts = 0
-        c.blocked_until = None
-        c.save(update_fields=["login_attempts", "blocked_until", "updated_at"])
+        window = timezone.now() - datetime.timedelta(minutes=5)
+        recent_fails = LoginAttempt.objects.filter(
+            cpf=clean_cpf,
+            was_successful=False,
+            attempted_at__gte=window
+        ).order_by("-attempted_at")
+
+        fail_count = recent_fails.count()
+        if fail_count >= 5:
+            last_attempt = recent_fails.first()
+            if last_attempt:
+                elapsed = (timezone.now() - last_attempt.attempted_at).total_seconds()
+                remaining = int(300 - elapsed)
+                if remaining > 0:
+                    return True, remaining
         return False, 0
 
     def reset_failed_attempts(self, cpf: str) -> None:
-        from .models import Citizen
+        from .models import LoginAttempt
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        Citizen.objects.filter(cpf=clean_cpf).update(login_attempts=0, blocked_until=None)
+        # Zero DELETE físico (RN-40 e mínimo privilégio 4D.2)
+        LoginAttempt.objects.filter(cpf=clean_cpf, was_successful=False).update(was_successful=True)
 
     def set_recovery_code(self, cpf: str, code: str) -> None:
         from .models import Citizen
@@ -249,6 +368,54 @@ class CitizenDjangoORMRepository:
             recovery_code_hash=None,
             recovery_code_expires_at=None
         )
+
+    # --- Gestão de Sessões e Revogação (accountsSession) ---
+    def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
+        from .models import Session
+        from django.utils import timezone
+        from common.security.db_context import db_security_context
+        from common.security.authentication import SospUser
+
+        exp = expires_at or (timezone.now() + datetime.timedelta(minutes=30))
+        try:
+            with db_security_context(user=SospUser(user_id=subject_id, role=subject_type)):
+                Session.objects.create(
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    token_hash=token_hash,
+                    ip_address=ip_address,
+                    user_agent=(user_agent or "")[:500],
+                    expires_at=exp,
+                )
+        except Exception:
+            # Em modo SQLite ou testes sem tabela Session, prossegue com degradação suave
+            pass
+
+    def is_session_revoked(self, token_hash: str) -> bool:
+        from .models import Session
+        try:
+            sess = Session.objects.filter(token_hash=token_hash).first()
+            if not sess:
+                return False
+            return sess.revoked_at is not None
+        except Exception:
+            return False
+
+    def revoke_session(self, token_hash: str) -> None:
+        from .models import Session
+        from django.utils import timezone
+        try:
+            Session.objects.filter(token_hash=token_hash).update(revoked_at=timezone.now())
+        except Exception:
+            pass
+
+    def revoke_all_sessions(self, subject_id: str) -> None:
+        from .models import Session
+        from django.utils import timezone
+        try:
+            Session.objects.filter(subject_id=subject_id, revoked_at__isnull=True).update(revoked_at=timezone.now())
+        except Exception:
+            pass
 
     def _to_dict(self, c) -> Dict[str, Any]:
         return {

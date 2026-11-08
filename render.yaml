@@ -1,0 +1,62 @@
+# ==============================================================================
+# SOSP — Manifesto Declarativo de Infraestrutura Render (render.yaml)
+# Referência: ADR-001, ADR-002, ADR-003, ADR-008
+# ==============================================================================
+services:
+  - type: web
+    name: sosp-backend-staging
+    runtime: python
+    rootDir: backend
+    plan: starter
+    region: oregon # ou frankfurt / ohio
+    buildCommand: "./render-build.sh"
+    startCommand: "gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile -"
+    healthCheckPath: "/api/v1/health"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: "sosp-backend-staging.onrender.com,localhost,127.0.0.1"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev,https://portal.sosp.al.gov.br"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev,https://portal.sosp.al.gov.br"
+      - key: REPOSITORY_BACKEND
+        value: orm
+      - key: DB_ENGINE
+        value: postgresql
+      - key: DB_HOST
+        value: aws-1-sa-east-1.pooler.supabase.com
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: sosp_runtime_app.cidtcgfowvgwgggvhbym
+      - key: DB_SSLMODE
+        value: verify-full
+      - key: DB_SSLROOTCERT
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_CONNECT_TIMEOUT
+        value: "10"
+      - key: DB_STATEMENT_TIMEOUT
+        value: "30000"
+      - key: DB_CONN_MAX_AGE
+        value: "0"
+      - key: DB_DISABLE_SERVER_SIDE_CURSORS
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SECURE_SSL_REDIRECT
+        value: "true"
+      # --- Segredos configurados no painel do Render (sync: false) ---
+      - key: SECRET_KEY
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HMAC_SECRET_KEY
+        sync: false

@@ -2,7 +2,7 @@ import { Agency, Appointment, AppointmentSlot, CitizenProfile, ProblemDetails, P
 import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
 
 // Mock em memória para agendamentos do cidadão
 let MOCK_APPOINTMENTS: Appointment[] = [
@@ -45,15 +45,26 @@ let MOCK_APPOINTMENTS: Appointment[] = [
 export class ApiClient {
   private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${BASE_URL}${endpoint}`;
-    const headers = {
+    let authToken = "";
+    if (typeof window !== "undefined") {
+      authToken = localStorage.getItem("sosp_auth_token") || "";
+    }
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
-      ...options.headers,
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(options.headers as Record<string, string>),
     };
 
     try {
       const res = await fetch(url, { ...options, headers });
       if (!res.ok) {
+        if (res.status === 401 && typeof window !== "undefined") {
+          localStorage.removeItem("sosp_auth_token");
+          if (!window.location.pathname.includes("/login")) {
+            window.location.href = "/sessao-expirada";
+          }
+        }
         let problem: ProblemDetails;
         try {
           problem = await res.json();
@@ -308,10 +319,25 @@ export class ApiClient {
         },
       };
     }
-    return this.request("/auth/login", {
+    const res = await this.request<{
+      token: string;
+      tokenType: string;
+      expiresIn: number;
+      citizen: {
+        id: string;
+        fullName: string;
+        cpf: string;
+        email: string;
+        role: string;
+      };
+    }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ cpf, password }),
     });
+    if (typeof window !== "undefined" && res.token) {
+      localStorage.setItem("sosp_auth_token", res.token);
+    }
+    return res;
   }
 
   static async recoverPassword(cpf: string): Promise<{ message: string; codeSimulated?: string }> {
@@ -403,6 +429,26 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
   }
+  static logout(): void {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("sosp_auth_token");
+      sessionStorage.clear();
+      if (!window.location.pathname.includes("/login")) {
+        window.location.href = "/login";
+      }
+    }
+  }
+
+  static getAuthToken(): string | null {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sosp_auth_token");
+    }
+    return null;
+  }
+
+  static isAuthenticated(): boolean {
+    return !!this.getAuthToken();
+  }
 }
 
 // Named exports for ease of consumption
@@ -417,6 +463,8 @@ export const getAppointmentByProtocol = ApiClient.getAppointmentByProtocol.bind(
 export const cancelAppointment = ApiClient.cancelAppointment.bind(ApiClient);
 export const registerCitizen = ApiClient.registerCitizen.bind(ApiClient);
 export const loginCitizen = ApiClient.login.bind(ApiClient);
+export const logout = ApiClient.logout.bind(ApiClient);
+export const isAuthenticated = ApiClient.isAuthenticated.bind(ApiClient);
 export const recoverPassword = ApiClient.recoverPassword.bind(ApiClient);
 export const resetPassword = ApiClient.resetPassword.bind(ApiClient);
 export const getCitizenMe = ApiClient.getCitizenMe.bind(ApiClient);
