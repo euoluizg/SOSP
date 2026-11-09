@@ -117,11 +117,15 @@ class AccountService:
         hashed_password = make_password(password)
 
         clean_cpf = "".join(filter(str.isdigit, cpf))
+        gender_code = data.get("gender", "").strip()
+        gender_desc = data.get("genderDescription", "").strip() if gender_code == "O" else ""
         citizen_data = {
             "fullName": data.get("fullName", "").strip(),
             "cpf": clean_cpf,
             "socialName": data.get("socialName", "").strip(),
             "birthDate": birth_date,
+            "gender": gender_code,
+            "genderDescription": gender_desc[:120],
             "motherName": data.get("motherName", "").strip(),
             "rg": data.get("rg", "").strip(),
             "rgIssuer": data.get("rgIssuer", "").strip(),
@@ -273,7 +277,8 @@ class AccountService:
                 errors=[{"field": "newPassword", "message": err} for err in pwd_errors],
             )
 
-        citizen["passwordHash"] = make_password(new_password)
+        new_password_hash = make_password(new_password)
+        citizen_repository.update_password(clean_cpf, new_password_hash)
         citizen_repository.clear_recovery_code(clean_cpf)
         # Revoga todas as sessões ativas no servidor (proteção de redefinição de credencial)
         citizen_repository.revoke_all_sessions(citizen["id"])

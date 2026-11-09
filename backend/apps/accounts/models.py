@@ -34,6 +34,7 @@ class Citizen(models.Model):
     login_attempts = models.IntegerField(db_column="loginattempts", default=0)
     blocked_until = models.DateTimeField(db_column="blockeduntil", null=True, blank=True)
     gender = models.ForeignKey("accounts.Gender", db_column="genderid", on_delete=models.PROTECT)
+    gender_description = models.CharField(db_column="genderdescription", max_length=120, null=True, blank=True)
     is_pcd = models.BooleanField(db_column="ispcd", default=False)
     disability_description = models.CharField(db_column="disabilitydescription", max_length=120, null=True, blank=True)
     mother_name = models.CharField(db_column="mothername", max_length=120)

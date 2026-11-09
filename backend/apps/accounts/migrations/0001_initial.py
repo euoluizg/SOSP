@@ -236,6 +236,7 @@ class Migration(migrations.Migration):
                         ('updated_at', models.DateTimeField(auto_now=True, db_column='updatedat')),
                         ('deleted_at', models.DateTimeField(blank=True, db_column='deletedat', null=True)),
                         ('gender', models.ForeignKey(db_column='genderid', on_delete=django.db.models.deletion.PROTECT, to='accounts.gender')),
+                        ('gender_description', models.CharField(blank=True, db_column='genderdescription', max_length=120, null=True)),
                     ],
                     options={
                         'verbose_name': 'Cidadão',

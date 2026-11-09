@@ -80,6 +80,7 @@ BEGIN;
     loginAttempts         integer NOT NULL DEFAULT 0,
     blockedUntil          timestamptz,
     genderId              uuid NOT NULL,
+    genderDescription     varchar(120),
     isPcd                 boolean NOT NULL DEFAULT false,
     disabilityDescription varchar(120),
     motherName            varchar(120) NOT NULL,
@@ -188,6 +189,51 @@ BEGIN;
   CREATE UNIQUE INDEX IF NOT EXISTS uqAccountsInternalUserEmail ON accountsInternalUser (lower(email)) WHERE deletedAt IS NULL;
   CREATE UNIQUE INDEX IF NOT EXISTS uqAccountsInternalUserRegistration ON accountsInternalUser (registrationNumber) WHERE deletedAt IS NULL;
   CREATE INDEX IF NOT EXISTS idxAccountsInternalUserAgency ON accountsInternalUser (agencyId);
+
+  -- Função de autenticação cirúrgica de menor privilégio para usuários internos (sosp_security)
+  CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
+  RETURNS TABLE (
+      user_id UUID,
+      full_name VARCHAR,
+      email VARCHAR,
+      registration_number VARCHAR,
+      agency_id UUID,
+      role VARCHAR,
+      can_manage_catalog BOOLEAN,
+      password_hash TEXT,
+      is_active BOOLEAN
+  )
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public
+  AS $$
+  BEGIN
+      IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+          RETURN;
+      END IF;
+
+      RETURN QUERY
+      SELECT
+          u.id AS user_id,
+          u.fullName AS full_name,
+          u.email AS email,
+          u.registrationNumber AS registration_number,
+          u.agencyId AS agency_id,
+          u.role AS role,
+          u.canManageCatalog AS can_manage_catalog,
+          u.passwordHash AS password_hash,
+          u.isActive AS is_active
+      FROM public.accountsInternalUser u
+      WHERE u.cpf = p_cpf
+        AND u.isActive = true
+        AND u.deletedAt IS NULL
+      LIMIT 1;
+  END;
+  $$;
+
+  REVOKE ALL ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) FROM PUBLIC;
+  COMMENT ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) IS
+  'SOSP: Autenticação de usuários internos com menor privilégio (SECURITY DEFINER) sob RLS.';
 
   CREATE TABLE IF NOT EXISTS accountsSession (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

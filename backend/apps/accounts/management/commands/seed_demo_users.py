@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.hashers import make_password
 from apps.accounts.models import Citizen, InternalUser, Gender
+from apps.catalog.models import Agency
 
 class Command(BaseCommand):
     help = "Cria ou atualiza com idempotência os usuários sintéticos de demonstração do SOSP (cidadãos, servidores e gestores)."
@@ -113,34 +114,63 @@ class Command(BaseCommand):
             action = "Criado" if created else "Atualizado"
             self.stdout.write(self.style.SUCCESS(f"  [Cidadão] {action}: {c.full_name} ({c.cpf})"))
 
-        # 3. Usuários Internos (Servidores e Gestores)
+        # 3. Garante órgãos institucionais de lotação (ADR-003 / RN-35 / RN-36)
+        agency_ssp = Agency.objects.filter(acronym="SSP", is_active=True).first()
+        if not agency_ssp:
+            agency_ssp = Agency.objects.create(
+                name="Secretaria de Estado da Segurança Pública",
+                acronym="SSP",
+                sphere="Estadual",
+                description="Responsável pela segurança pública e identificação civil.",
+                is_active=True,
+            )
+
+        agency_detran = Agency.objects.filter(acronym__in=["DETRAN", "DETRAN-AL"], is_active=True).first()
+        if not agency_detran:
+            agency_detran = Agency.objects.create(
+                name="Departamento Estadual de Trânsito",
+                acronym="DETRAN",
+                sphere="Estadual",
+                description="Responsável pela habilitação de condutores e trânsito.",
+                is_active=True,
+            )
+
+        # 4. Usuários Internos (Servidores, Gestores e Administradores)
         internal_data = [
             {
                 "cpf": "33366699957",
-                "name": "João Servidor Central",
+                "full_name": "João Servidor Central",
                 "email": "joao.servidor@ssp.al.gov.br",
-                "role": "server",
+                "role": "servant",
+                "agency_id": agency_ssp.id,
+                "can_manage_catalog": False,
                 "registration_number": "SSP-1001",
             },
             {
                 "cpf": "44477700083",
-                "name": "Ana Servidora Farol",
+                "full_name": "Ana Servidora Farol",
                 "email": "ana.servidora@detran.al.gov.br",
-                "role": "server",
+                "role": "servant",
+                "agency_id": agency_detran.id,
+                "can_manage_catalog": False,
                 "registration_number": "DET-2002",
             },
             {
                 "cpf": "55588811194",
-                "name": "Carlos Gestor SSP",
+                "full_name": "Carlos Gestor SSP",
                 "email": "carlos.gestor@ssp.al.gov.br",
-                "role": "manager",
+                "role": "gestor",
+                "agency_id": agency_ssp.id,
+                "can_manage_catalog": True,
                 "registration_number": "GES-3003",
             },
             {
                 "cpf": "99988877714",
-                "name": "Admin SOSP Geral",
+                "full_name": "Admin SOSP Geral",
                 "email": "admin@sosp.al.gov.br",
                 "role": "superadmin",
+                "agency_id": None,
+                "can_manage_catalog": True,
                 "registration_number": "ADM-0001",
             },
         ]
@@ -149,21 +179,22 @@ class Command(BaseCommand):
             u, created = InternalUser.objects.update_or_create(
                 cpf=u_data["cpf"],
                 defaults={
-                    "name": u_data["name"],
+                    "full_name": u_data["full_name"],
                     "email": u_data["email"],
                     "role": u_data["role"],
+                    "agency_id": u_data.get("agency_id"),
+                    "can_manage_catalog": u_data.get("can_manage_catalog", False),
                     "registration_number": u_data["registration_number"],
                     "password_hash": pwd_hash,
                     "is_active": True,
                 }
             )
             action = "Criado" if created else "Atualizado"
-            self.stdout.write(self.style.SUCCESS(f"  [Interno] {action}: {u.name} (Role: {u.role})"))
+            self.stdout.write(self.style.SUCCESS(f"  [Interno] {action}: {u.full_name} (Role: {u.role})"))
 
         self.stdout.write(self.style.SUCCESS("✓ Seed de usuários concluído com sucesso. Zero agendamentos criados."))
         if is_generated:
-            self.stdout.write(self.style.WARNING(
-                f"\n[AVISO DE SEGURANÇA] Credencial temporária gerada dinamicamente para esta execução local:\n"
-                f"  Credencial: {demo_auth_secret}\n"
-                f"Guarde esta credencial se desejar realizar testes manuais. Nenhuma senha estática está gravada no código versionado."
+            self.stdout.write(self.style.SUCCESS(
+                "[SEGURANÇA] Credencial temporária gerada e aplicada com sucesso. "
+                "Valor mascarado para proteção contra vazamento em logs compartilhados e pipelines de CI."
             ))

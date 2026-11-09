@@ -165,6 +165,10 @@ class CitizenInMemoryRepository:
         data["id"] = citizen_id
         if "cpf" in data:
             data["cpf"] = "".join(filter(str.isdigit, data["cpf"]))
+        if "gender" in data:
+            data["gender"] = data["gender"]
+        if "genderDescription" in data:
+            data["genderDescription"] = data["genderDescription"]
         self._citizens[citizen_id] = data
         return data
 
@@ -215,6 +219,14 @@ class CitizenInMemoryRepository:
     def clear_recovery_code(self, cpf: str) -> None:
         clean_cpf = "".join(filter(str.isdigit, cpf))
         self._recovery_codes.pop(clean_cpf, None)
+
+    def update_password(self, cpf: str, password_hash: str) -> bool:
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        for c in self._citizens.values():
+            if c.get("cpf") == clean_cpf:
+                c["passwordHash"] = password_hash
+                return True
+        return False
 
     # --- Gestão de Sessões e Revogação (accountsSession) ---
     def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
@@ -285,10 +297,11 @@ class CitizenDjangoORMRepository:
         if len(clean_cpf) != 11:
             return None
 
-        # 1. Em PostgreSQL: Exclusivamente via função SECURITY DEFINER de menor privilégio
+        # 1. Em PostgreSQL: Exclusivamente via funções SECURITY DEFINER de menor privilégio sob RLS
         if connection.vendor == "postgresql":
             try:
                 with connection.cursor() as cur:
+                    # 1.1 Consulta cidadão via função cirúrgica (LIMIT 1)
                     cur.execute(
                         "SELECT citizen_id, full_name, email, password_hash, is_active, blocked_until, login_attempts, role "
                         "FROM sosp_security.authenticate_citizen_by_cpf(%s);",
@@ -307,10 +320,40 @@ class CitizenDjangoORMRepository:
                             "loginAttempts": row[6] or 0,
                             "role": row[7] or "citizen",
                         }
+
+                    # 1.2 Consulta usuário interno (servidores, gestores e administradores) via função cirúrgica sob RLS
+                    cur.execute(
+                        "SELECT user_id, full_name, email, registration_number, agency_id, role, can_manage_catalog, password_hash, is_active "
+                        "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
+                        [clean_cpf]
+                    )
+                    irow = cur.fetchone()
+                    if irow:
+                        role = irow[5]
+                        if role in ("servant", "server"):
+                            role = "server"
+                        elif role in ("manager", "gestor"):
+                            role = "gestor"
+
+                        return {
+                            "id": str(irow[0]),
+                            "fullName": irow[1],
+                            "cpf": clean_cpf,
+                            "email": irow[2],
+                            "registrationNumber": irow[3],
+                            "agencyId": str(irow[4]) if irow[4] else None,
+                            "unitId": None,
+                            "role": role,
+                            "canManageCatalog": irow[6],
+                            "passwordHash": irow[7],
+                            "isActive": irow[8],
+                            "blockedUntil": None,
+                            "loginAttempts": 0,
+                        }
                     return None
             except Exception as e:
                 logger.error(
-                    "FALHA DE SEGURANÇA: Função sosp_security.authenticate_citizen_by_cpf inacessível no PostgreSQL: %s. "
+                    "FALHA DE SEGURANÇA: Funções sosp_security de autenticação inacessíveis no PostgreSQL: %s. "
                     "Fallback privilegiado (role='server') está PERMANENTEMENTE DESATIVADO por política de menor privilégio.",
                     e
                 )
@@ -402,6 +445,7 @@ class CitizenDjangoORMRepository:
                     password_hash=data.get("passwordHash", ""),
                     password_salt=data.get("passwordSalt", "salt"),
                     gender=gender,
+                    gender_description=data.get("genderDescription") or data.get("gender_description", ""),
                     is_pcd=data.get("isPcd", False),
                     disability_description=data.get("pcdDetails") or data.get("disabilityDescription", ""),
                     mother_name=data.get("motherName", "").strip(),
@@ -420,6 +464,7 @@ class CitizenDjangoORMRepository:
                 if "fullName" in data: citizen.full_name = data["fullName"]
                 if "email" in data: citizen.email = data["email"].strip().lower()
                 if "phone" in data: citizen.phone = "".join(filter(str.isdigit, data["phone"]))
+                if "genderDescription" in data: citizen.gender_description = data["genderDescription"]
                 citizen.save()
         except IntegrityError as e:
             if "cpf" in str(e).lower() or "unique" in str(e).lower():
@@ -479,34 +524,69 @@ class CitizenDjangoORMRepository:
         # Zero DELETE físico (RN-40 e mínimo privilégio 4D.2)
         LoginAttempt.objects.filter(cpf=clean_cpf, was_successful=False).update(was_successful=True)
 
+    def update_password(self, cpf: str, password_hash: str) -> bool:
+        from .models import Citizen, InternalUser
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        updated = Citizen.objects.filter(cpf=clean_cpf, is_active=True).update(
+            password_hash=password_hash
+        )
+        if updated:
+            return True
+        updated_internal = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(
+            password_hash=password_hash
+        )
+        return bool(updated_internal)
+
     def set_recovery_code(self, cpf: str, code: str) -> None:
-        from .models import Citizen
+        from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
         clean_cpf = "".join(filter(str.isdigit, cpf))
         exp = timezone.now() + datetime.timedelta(minutes=15)
-        Citizen.objects.filter(cpf=clean_cpf).update(
+        updated = Citizen.objects.filter(cpf=clean_cpf, is_active=True).update(
             recovery_code_hash=code,
             recovery_code_expires_at=exp
         )
+        if not updated:
+            u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
+            if u:
+                PasswordReset.objects.create(
+                    internal_user=u,
+                    code_hash=code,
+                    expires_at=exp
+                )
 
     def verify_recovery_code(self, cpf: str, code: str) -> bool:
-        from .models import Citizen
+        from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        c = Citizen.objects.filter(cpf=clean_cpf).first()
-        if not c or not c.recovery_code_hash:
-            return False
-        if c.recovery_code_expires_at and timezone.now() > c.recovery_code_expires_at:
-            return False
-        return c.recovery_code_hash == code
+        c = Citizen.objects.filter(cpf=clean_cpf, is_active=True).first()
+        if c and c.recovery_code_hash:
+            if c.recovery_code_expires_at and timezone.now() > c.recovery_code_expires_at:
+                return False
+            return c.recovery_code_hash == code
+
+        u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
+        if u:
+            pr = PasswordReset.objects.filter(internal_user=u, code_hash=code, used_at__isnull=True).order_by("-created_at").first()
+            if pr:
+                if timezone.now() > pr.expires_at:
+                    return False
+                return True
+        return False
 
     def clear_recovery_code(self, cpf: str) -> None:
-        from .models import Citizen
+        from .models import Citizen, InternalUser, PasswordReset
+        from django.utils import timezone
         clean_cpf = "".join(filter(str.isdigit, cpf))
         Citizen.objects.filter(cpf=clean_cpf).update(
             recovery_code_hash=None,
             recovery_code_expires_at=None
         )
+        u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
+        if u:
+            PasswordReset.objects.filter(internal_user=u, used_at__isnull=True).update(
+                used_at=timezone.now()
+            )
 
     # --- Gestão de Sessões e Revogação (accountsSession) ---
     def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
@@ -568,6 +648,8 @@ class CitizenDjangoORMRepository:
             "rgIssuer": "",
             "email": c.email,
             "phone": c.phone,
+            "gender": c.gender.name if getattr(c, "gender", None) else "",
+            "genderDescription": getattr(c, "gender_description", "") or "",
             "passwordHash": c.password_hash,
             "passwordSalt": c.password_salt,
             "isPcd": c.is_pcd,
