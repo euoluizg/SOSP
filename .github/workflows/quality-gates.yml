@@ -47,6 +47,8 @@ jobs:
           npm test
 
       - name: "Build de Produção Next.js 15 (24 rotas)"
+        env:
+          NEXT_PUBLIC_API_URL: "https://sosp-backend-staging.onrender.com/api/v1"
         run: |
           cd portal
           npm run build

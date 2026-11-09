@@ -5,7 +5,9 @@
   "description": "Portal do Cidadão e Back-office do Sistema de Orientação para Serviços Públicos (SOSP)",
   "scripts": {
     "dev": "next dev --port 3000",
+    "prebuild": "node scripts/verify-build-env.mjs",
     "build": "next build",
+    "prebuild:cloudflare": "node scripts/verify-build-env.mjs",
     "build:cloudflare": "opennextjs-cloudflare build",
     "preview:cloudflare": "wrangler dev",
     "deploy:cloudflare": "wrangler deploy",
