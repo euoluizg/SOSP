@@ -330,7 +330,8 @@ export class ApiClient {
   static async recoverPassword(cpf: string): Promise<{ message: string; codeSimulated?: string }> {
     if (USE_MOCK) {
       await new Promise((r) => setTimeout(r, 200));
-      return { message: "Código enviado para o e-mail cadastrado.", codeSimulated: "123456" };
+      const dynamicCode = String(Math.floor(100000 + Math.random() * 900000));
+      return { message: "Código enviado para o e-mail cadastrado.", codeSimulated: dynamicCode };
     }
     return this.request("/auth/recover-password", {
       method: "POST",

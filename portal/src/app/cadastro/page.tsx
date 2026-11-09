@@ -129,6 +129,15 @@ export default function RegisterPage() {
       newErrors.motherName = "Nome da mãe é obrigatório para conferência cadastral.";
     }
 
+    if (
+      formData.gender === "O" &&
+      formData.genderDescription &&
+      formData.genderDescription.trim().length > 120
+    ) {
+      newErrors.genderDescription =
+        "A descrição de identidade de gênero não pode exceder 120 caracteres.";
+    }
+
     if (formData.isPcd && !formData.disabilityType.trim()) {
       newErrors.disabilityType = "Por favor, especifique o tipo de deficiência.";
     }
@@ -190,6 +199,8 @@ export default function RegisterPage() {
         cpf: formData.cpf,
         birthDate: formData.birthDate,
         gender: formData.gender,
+        genderDescription:
+          formData.gender === "O" ? formData.genderDescription.trim() || undefined : undefined,
         motherName: formData.motherName,
         email: formData.email,
         phone: formData.mobilePhone || formData.landlinePhone,
@@ -246,8 +257,7 @@ export default function RegisterPage() {
           </div>
           <h2 className="text-2xl font-bold text-gray-900">Cadastro Concluído com Sucesso!</h2>
           <p className="mt-3 text-sm text-gray-600 leading-relaxed">
-            Seu cadastro no SOSP foi registrado com sucesso. Um e-mail de confirmação foi enviado
-            para <span className="font-semibold text-gray-900">{formData.email}</span>.
+            Seu cadastro no SOSP foi realizado com sucesso. Você já pode fazer login utilizando seu CPF e senha cadastrados para acessar orientações e agendamentos.
           </p>
           <div className="mt-8">
             <Button

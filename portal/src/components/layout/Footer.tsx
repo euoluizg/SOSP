@@ -16,7 +16,7 @@ export const Footer: React.FC = () => {
             </p>
             <p className="text-gray-500 text-[11px] mt-1 max-w-xl leading-relaxed">
               Aviso institucional: O SOSP é um projeto de pesquisa e extensão acadêmica do curso de
-              Engenharia de Software do Centro Universitário CESMAC. Esta plataforma não representa
+              Sistema de Informação do Centro Universitário CESMAC. Esta plataforma não representa
               um canal oficial do governo estadual ou federal.
             </p>
           </div>

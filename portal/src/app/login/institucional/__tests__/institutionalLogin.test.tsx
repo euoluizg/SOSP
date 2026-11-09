@@ -80,9 +80,47 @@ describe("Login Institucional (ADR-003, RN-35, RN-36)", () => {
     });
 
     expect(mockPush).not.toHaveBeenCalled();
+    expect(localStorage.getItem("sosp_auth_token")).toBeNull();
+    expect(localStorage.getItem("sosp_user")).toBeNull();
   });
 
-  it("deve redirecionar servidor público para /servidor/painel", async () => {
+  it("deve rejeitar perfil desconhecido sem gravar token no localStorage nem redirecionar", async () => {
+    const mockLogin = vi.mocked(apiClient.loginCitizen);
+    mockLogin.mockResolvedValueOnce({
+      token: "jwt-token-unknown",
+      tokenType: "Bearer",
+      expiresIn: 3600,
+      citizen: {
+        id: "user-unknown",
+        fullName: "Usuário Desconhecido",
+        cpf: "77788899941",
+        email: "unknown@exemplo.com",
+        role: "guest",
+      },
+    });
+
+    render(<InstitutionalLoginPage />);
+
+    const cpfInput = screen.getByLabelText(/cpf do servidor ou gestor/i);
+    const passInput = screen.getByLabelText(/senha institucional/i);
+    const submitBtn = screen.getByRole("button", { name: /acessar painel institucional/i });
+
+    fireEvent.change(cpfInput, { target: { value: "777.888.999-41" } });
+    fireEvent.change(passInput, { target: { value: "SenhaForte@123" } });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/perfil de acesso institucional não reconhecido/i)
+      ).toBeInTheDocument();
+    });
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(localStorage.getItem("sosp_auth_token")).toBeNull();
+    expect(localStorage.getItem("sosp_user")).toBeNull();
+  });
+
+  it("deve redirecionar servidor público para /servidor/painel e gravar sessão autorizada", async () => {
     const mockLogin = vi.mocked(apiClient.loginCitizen);
     mockLogin.mockResolvedValueOnce({
       token: "jwt-token-server",
@@ -110,9 +148,10 @@ describe("Login Institucional (ADR-003, RN-35, RN-36)", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/servidor/painel");
     });
+    expect(localStorage.getItem("sosp_auth_token")).toBe("jwt-token-server");
   });
 
-  it("deve redirecionar gestor institucional para /admin/orgaos", async () => {
+  it("deve redirecionar gestor institucional para /admin/orgaos e gravar sessão autorizada", async () => {
     const mockLogin = vi.mocked(apiClient.loginCitizen);
     mockLogin.mockResolvedValueOnce({
       token: "jwt-token-manager",
@@ -140,5 +179,7 @@ describe("Login Institucional (ADR-003, RN-35, RN-36)", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/admin/orgaos");
     });
+    expect(localStorage.getItem("sosp_auth_token")).toBe("jwt-token-manager");
   });
 });
+

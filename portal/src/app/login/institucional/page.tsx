@@ -62,14 +62,11 @@ function InstitutionalLoginContent() {
 
     try {
       const res = await loginCitizen(cpf, password);
-      setFailedAttempts(0);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("sosp_auth_token", res.token);
-        localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
-      }
 
-      // Validação de perfil institucional
+      // Validação estrita de perfil institucional antes de iniciar sessão (RN-35, RN-36, ADR-003)
       const role = res.citizen?.role;
+      const allowedRoles = ["server", "gestor", "manager", "admin", "superadmin"];
+
       if (role === "citizen") {
         setFormError(
           "Esta conta possui perfil de Cidadão. Por favor, acesse o portal do cidadão."
@@ -77,11 +74,26 @@ function InstitutionalLoginContent() {
         return;
       }
 
+      if (!role || !allowedRoles.includes(role)) {
+        setFormError(
+          "Perfil de acesso institucional não reconhecido ou sem permissão de acesso a este painel."
+        );
+        return;
+      }
+
+      // Sessão estabelecida apenas após validação de perfil institucional autorizado
+      setFailedAttempts(0);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sosp_auth_token", res.token);
+        localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
+      }
+
       if (safeRedirect) {
         router.push(safeRedirect);
       } else if (role === "server") {
         router.push("/servidor/painel");
       } else {
+        // gestor, manager, admin, superadmin
         router.push("/admin/orgaos");
       }
     } catch (err: unknown) {
@@ -282,3 +294,4 @@ export default function InstitutionalLoginPage() {
     </Suspense>
   );
 }
+

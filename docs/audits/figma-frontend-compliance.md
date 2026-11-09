@@ -103,3 +103,28 @@ Esta auditoria realizou a comparação minuciosa entre as 30 telas lógicas do F
 - **Correção:** 
   - Backend: Criação de endpoint `GET /api/v1/agencies/{id}` e `PATCH /api/v1/agencies/{id}` com controle de permissão RBAC e auditoria `auditEvent`.
   - Frontend: Inclusão do botão "Editar", modal de edição com validação, feedback de sucesso e cancelamento seguro sem perda de dados.
+
+### Divergência 9: Autodeclaração de Gênero com Descrição e Limite de 120 Caracteres
+- **Problema:** O campo condicional de descrição de identidade de gênero não enviava o dado ao backend e não possuía validação explícita de tamanho máximo.
+- **Correção:**
+  - Frontend: Inclusão de `genderDescription` no envio de `registerCitizen`, validação estrita de tamanho máximo de 120 caracteres no client-side e cobertura automatizada com testes Vitest.
+  - Backend: Serializer `CitizenRegisterSerializer` expandido com `genderDescription` (maxLength 120), validação condicional quando `gender == "O"` e sincronização com o contrato OpenAPI 3.0.3.
+
+### Divergência 10: Mensagem Verídica de Conclusão de Cadastro (Sem Falsa Promessa de E-mail)
+- **Problema:** A tela de sucesso de cadastro exibia mensagem afirmando que um e-mail de confirmação havia sido enviado, embora o fluxo de ativação no MVP não utilize token de confirmação por e-mail para liberação de acesso.
+- **Correção:** Remoção da declaração inverídica e substituição pela mensagem verídica: `"Seu cadastro no SOSP foi realizado com sucesso. Você já pode fazer login utilizando seu CPF e senha cadastrados para acessar orientações e agendamentos."`.
+
+### Divergência 11: Login Institucional — Validação de Perfil Prévia ao Armazenamento de Sessão
+- **Problema:** O token JWT era gravado no `localStorage` antes da validação do papel (`role`) do usuário, permitindo vazamento de token para perfis de cidadão comum e redirecionamento indevido para painel administrativo em perfis desconhecidos.
+- **Correção:**
+  - O `localStorage` só é alimentado após a checagem explícita de papéis permitidos (`server`, `gestor`, `manager`, `admin`, `superadmin`).
+  - Cidadãos recebem mensagem orientativa imediata para utilizar `/login`.
+  - Perfis desconhecidos são barrados com mensagem de erro explícita e nenhum token é persistido. Testes unitários com Vitest validam que `sosp_auth_token` permanece `null` em tentativas inválidas.
+
+### Divergência 12: Zero Fakes e Credenciais Dinâmicas de Demonstração
+- **Problema:** Existência de credenciais fixas hardcoded e agendamentos fictícios pré-populados.
+- **Correção:**
+  - Backend: `SchedulingInMemoryRepository` inicia rigorosamente vazio (`_appointments = []`). Cidadãos recém-cadastrados iniciam com zero histórico e zero agendamentos.
+  - Testes automatizados utilizam método explícito sob demanda (`seed_test_fixtures`).
+  - Remoção de senhas fixas do código: geração dinâmica criptográfica (`secrets`), isolamento por ambiente e bloqueio estrito de execução do seed em staging/produção via `CommandError`.
+

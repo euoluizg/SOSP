@@ -109,3 +109,4 @@ O sistema mantém estritamente os órgãos públicos do escopo de Alagoas defini
 | **Django System Check** | `cd backend && python manage.py check` | 9 módulos | 0 problemas | ✅ GO |
 | **Navegação e Rotas** | Validação de `/ajuda`, `/login`, `/cidadao/meus-agendamentos` | 6 fluxos | 100% de conformidade | ✅ GO |
 | **Acessibilidade WCAG 2.1 AA** | Contraste e teclado | Todas as páginas | Sem violações impeditivas | ✅ GO |
+

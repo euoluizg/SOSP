@@ -101,6 +101,28 @@ Este relatório detalha a execução integral das melhorias visuais, de experiê
   - Direitos dos titulares (Art. 18 da LGPD) e canal de contato com a coordenação do projeto.
   - Ausência de compartilhamento comercial ou vazamentos de dados.
 
+### 2.12. Autodeclaração de Gênero e Mensagem Verídica de Cadastro
+- **Campo de Gênero Condicional e Persistência:**
+  - Formulário exibe campo de texto `"Qual? (informe como você se identifica)"` quando a opção "Outro" é selecionada.
+  - Validação estrita de tamanho máximo de 120 caracteres no client-side e no backend (`CitizenRegisterSerializer`).
+  - Campo integrado ao schema `CitizenRegistration` do contrato OpenAPI 3.0.3.
+- **Mensagem Verídica Pós-Cadastro:**
+  - Removida a falsa promessa de que um e-mail de confirmação havia sido enviado.
+  - Exibição de mensagem verídica: `"Seu cadastro no SOSP foi realizado com sucesso. Você já pode fazer login utilizando seu CPF e senha cadastrados para acessar orientações e agendamentos."`.
+
+### 2.13. Blindagem de Acesso e Sessão no Portal Institucional
+- **Guard de Sessão Pré-Storage:**
+  - `localStorage` não armazena tokens ou dados de sessão antes da validação estrita do papel do usuário.
+  - Tentativas de login de cidadão comum na rota `/login/institucional` são rejeitadas com aviso imediato, sem persistência de credenciais em cache local.
+  - Perfis desconhecidos ou inválidos são bloqueados e não redirecionam para o painel administrativo.
+
+### 2.14. Zero Agendamentos Iniciais e Credenciais Dinâmicas Isoladas
+- **Zero Fakes em Produção e Staging:**
+  - Cidadãos recém-cadastrados iniciam com zero agendamentos e zero histórico.
+  - Repositório de agendamento em memória inicializa estritamente vazio (`_appointments = []`).
+  - Fixtures de teste populadas isoladamente sob demanda (`seed_test_fixtures`).
+  - Eliminação de senhas estáticas em código: uso de senhas dinâmicas isoladas por sessão, variáveis de ambiente e bloqueio estrito de execução do seed em staging/produção (`CommandError`).
+
 ---
 
 ## 3. Matriz de Responsividade e Acessibilidade (WCAG 2.1 AA)
@@ -115,3 +137,4 @@ Este relatório detalha a execução integral das melhorias visuais, de experiê
 | **Gestão de Órgãos (Admin)** | Scroll horizontal na tabela | Tabela ampla com modais centralizados | Modais com foco retido (trap focus) | ✅ 7.5:1 |
 | **Página de Ajuda** | Cards verticais fluidos | Grade de 3 colunas | Navegável sem mouse | ✅ 10.3:1 |
 | **Footer Acadêmico** | Links empilhados | Flex horizontal | Foco visível nos links | ✅ 5.8:1 |
+
