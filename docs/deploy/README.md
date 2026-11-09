@@ -53,7 +53,7 @@ flowchart LR
 | `DB_NAME` | `postgres` | Não | Nome do banco de dados |
 | `DB_USER` | `sosp_runtime_app.cidtcgfowvgwgggvhbym` | Não | Usuário de runtime de menor privilégio |
 | `DB_SSLMODE` | `verify-full` | Não | TLS estrito com validação de CA |
-| `DB_SSLROOTCERT` | `/etc/ssl/certs/ca-certificates.crt` | Não | Bundle de certificados CA raiz do Linux |
+| `DB_SSLROOTCERT` | `/etc/secrets/supabase-ca.crt` | Não | CA raiz do Supabase, montada via **Secret File** do Render (ver §2.3) |
 | `DB_PASSWORD` | `[DEFINIDA_PELO_OPERADOR]` | **SIM** | Senha de runtime (`sync: false`) |
 | `DB_HMAC_SECRET_KEY` | `[DEFINIDA_PELO_OPERADOR]` | **SIM** | Chave HMAC de 32+ caracteres (`sync: false`) |
 | `SECRET_KEY` | `[GERADA_PELO_OPERADOR]` | **SIM** | Chave criptográfica Django (`sync: false`) |
@@ -61,6 +61,20 @@ flowchart LR
 > [!CAUTION]
 > **NUNCA execute `python manage.py migrate` automaticamente durante o build ou startup no Render.**
 > O schema físico já foi provisionado (4C.2/4D.2) e possui políticas RLS e grants rigorosos. Qualquer evolução de banco exige procedimento administrativo supervisionado.
+
+### 2.3 Secret File obrigatório: CA raiz do Supabase
+
+O pooler do Supabase apresenta um certificado emitido por uma CA **autoassinada** (`CN=Supabase Root 2021 CA`), que **não** está no bundle `/etc/ssl/certs/ca-certificates.crt` das imagens Linux. Por isso, `DB_SSLMODE=verify-full` falha com `SSL error: certificate verify failed` e o health check fica em `503`.
+
+Configuração obrigatória:
+
+1. Render > serviço `sosp-backend-staging` > **Environment** > **Secret Files** > **Add Secret File**.
+2. **Filename:** `supabase-ca.crt`
+3. **Contents:** conteúdo do certificado CA raiz do Supabase (`prod-ca-2021.crt`), obtido em Supabase > **Project Settings > Database > SSL Configuration > Download certificate**.
+4. Salvar. O arquivo é montado em `/etc/secrets/supabase-ca.crt`, caminho já referenciado por `DB_SSLROOTCERT`.
+
+> Este certificado é **público** (CA raiz), não é um segredo. Ainda assim, ele não é versionado no repositório: a montagem é feita pelo Secret File do Render.
+> O código também detecta automaticamente `/etc/secrets/supabase-ca.crt` quando `DB_SSLROOTCERT` não está definido (`backend/config/settings/base.py`).
 
 ---
 

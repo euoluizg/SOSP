@@ -40,7 +40,7 @@ services:
       - key: DB_SSLMODE
         value: verify-full
       - key: DB_SSLROOTCERT
-        value: /etc/ssl/certs/ca-certificates.crt
+        value: /etc/secrets/supabase-ca.crt
       - key: DB_CONNECT_TIMEOUT
         value: "10"
       - key: DB_STATEMENT_TIMEOUT
