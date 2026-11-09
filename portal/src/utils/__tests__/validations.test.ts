@@ -4,6 +4,7 @@ import {
   isValidEmail,
   isValidBirthDate,
   validatePasswordStrength,
+  sanitizeRedirectUrl,
 } from "../validations";
 
 describe("Validations (RF-01, RF-02, RN-29, RN-30)", () => {
@@ -92,6 +93,48 @@ describe("Validations (RF-01, RF-02, RN-29, RN-30)", () => {
       expect(res.feedback).toContain("Mínimo de 8 caracteres");
       expect(res.feedback).toContain("Pelo menos uma letra maiúscula");
       expect(res.feedback).toContain("Pelo menos uma letra minúscula");
+    });
+  });
+
+  describe("sanitizeRedirectUrl (Proteção contra Open Redirect — CWE-601)", () => {
+    it("deve aceitar caminhos relativos legítimos", () => {
+      expect(sanitizeRedirectUrl("/faq")).toBe("/faq");
+      expect(sanitizeRedirectUrl("/cidadao/meus-agendamentos")).toBe("/cidadao/meus-agendamentos");
+      expect(sanitizeRedirectUrl("/faq?categoria=docs")).toBe("/faq?categoria=docs");
+      expect(sanitizeRedirectUrl("/faq?q=termo#ajuda")).toBe("/faq?q=termo#ajuda");
+    });
+
+    it("deve rejeitar URLs absolutas externas com protocolo http ou https", () => {
+      expect(sanitizeRedirectUrl("https://evil.com")).toBeNull();
+      expect(sanitizeRedirectUrl("http://evil.com/faq")).toBeNull();
+      expect(sanitizeRedirectUrl("https://portal.sosp.workers.dev.attacker.com")).toBeNull();
+    });
+
+    it("deve rejeitar URLs protocol-relative ('//')", () => {
+      expect(sanitizeRedirectUrl("//evil.com")).toBeNull();
+      expect(sanitizeRedirectUrl("//evil.com/faq")).toBeNull();
+      expect(sanitizeRedirectUrl("///evil.com")).toBeNull();
+    });
+
+    it("deve rejeitar caracteres de escape e barras invertidas ('/\\', '\\')", () => {
+      expect(sanitizeRedirectUrl("/\\evil.com")).toBeNull();
+      expect(sanitizeRedirectUrl("\\evil.com")).toBeNull();
+      expect(sanitizeRedirectUrl("/\\\\evil.com")).toBeNull();
+    });
+
+    it("deve rejeitar esquemas executáveis perigosos (javascript:, data:, vbscript:)", () => {
+      expect(sanitizeRedirectUrl("javascript:alert(1)")).toBeNull();
+      expect(sanitizeRedirectUrl("/javascript:alert(1)")).toBeNull();
+      expect(sanitizeRedirectUrl("data:text/html,<script>alert(1)</script>")).toBeNull();
+      expect(sanitizeRedirectUrl("/data:text/html")).toBeNull();
+    });
+
+    it("deve retornar null para valores vazios, nulos ou indefinidos", () => {
+      expect(sanitizeRedirectUrl(null)).toBeNull();
+      expect(sanitizeRedirectUrl(undefined)).toBeNull();
+      expect(sanitizeRedirectUrl("")).toBeNull();
+      expect(sanitizeRedirectUrl("   ")).toBeNull();
+      expect(sanitizeRedirectUrl("/\x00evil")).toBeNull();
     });
   });
 });
