@@ -90,6 +90,40 @@ def server_other_unit_client():
 
 
 @pytest.fixture
+def server_ssp_tabuleiro_client():
+    """Cliente DRF autenticado como servidor da unidade-tabuleiro do MESMO órgão SSP."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-003",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id="unidade-tabuleiro",
+        full_name="Servidor Tabuleiro SSP",
+        email="servidor.tabuleiro@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def manager_ssp_client():
+    """Cliente DRF autenticado como gestor institucional do órgão SSP (sem unidade específica)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="manager-001",
+        role="gestor",
+        agency_id="orgao-ssp",
+        unit_id=None,
+        full_name="Gestor Institucional SSP",
+        email="gestor.ssp@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
 def admin_client():
     """Cliente DRF autenticado como administrador do sistema."""
     client = APIClient()
