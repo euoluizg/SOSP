@@ -1,11 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Clock, LogIn, Home } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { sanitizeRedirectUrl } from "@/utils/validations";
 
-export default function SessionExpiredPage() {
+function SessionExpiredContent() {
+  const searchParams = useSearchParams();
+  const redirectParam = searchParams.get("redirect");
+  const safeRedirect = sanitizeRedirectUrl(redirectParam);
+
+  const loginUrl = safeRedirect
+    ? `/login?redirect=${encodeURIComponent(safeRedirect)}`
+    : "/login";
+
   return (
     <div className="min-h-[calc(100vh-280px)] flex items-center justify-center py-12 px-4 bg-gray-50">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-gray-200 animate-fadeIn">
@@ -23,7 +33,7 @@ export default function SessionExpiredPage() {
         </p>
 
         <div className="mt-8 flex flex-col gap-3">
-          <Link href="/login" className="w-full">
+          <Link href={loginUrl} className="w-full">
             <Button variant="primary" className="w-full justify-center py-3 text-base">
               <LogIn className="w-4 h-4 mr-2" />
               Fazer Login Novamente
@@ -38,6 +48,20 @@ export default function SessionExpiredPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SessionExpiredPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[calc(100vh-280px)] flex items-center justify-center py-12 px-4 bg-gray-50">
+          <p className="text-gray-500 text-sm">Carregando...</p>
+        </div>
+      }
+    >
+      <SessionExpiredContent />
+    </Suspense>
   );
 }
 

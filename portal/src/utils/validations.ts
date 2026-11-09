@@ -92,3 +92,39 @@ export function validatePasswordStrength(password: string): {
   };
 }
 
+/**
+ * Valida e sanitiza uma URL de redirecionamento contra ataques de Open Redirect (CWE-601).
+ * Aceita estritamente caminhos relativos locais iniciados com '/', rejeitando URLs absolutas,
+ * protocol-relative ('//'), sequências de escape ('/\', '\') e esquemas executáveis.
+ */
+export function sanitizeRedirectUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string") return null;
+
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  // Rejeita caracteres de controle que podem burlar parsers
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+
+  // Rejeita caminhos que não comecem com '/' ou comecem com '//', '/\', '\\'
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.startsWith("/\\") || trimmed.startsWith("\\")) {
+    return null;
+  }
+
+  // Rejeita esquemas embutidos (ex.: /javascript:..., /http:...)
+  if (/^\/[^?#]*[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed, "http://localhost");
+    if (parsed.origin !== "http://localhost") {
+      return null;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+

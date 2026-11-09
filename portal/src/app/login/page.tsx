@@ -1,19 +1,22 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck, Lock, User, Eye, EyeOff, AlertCircle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { GovbrModal } from "@/components/features/auth/GovbrModal";
 import { maskCPF } from "@/utils/masks";
-import { isValidCPF } from "@/utils/validations";
+import { isValidCPF, sanitizeRedirectUrl } from "@/utils/validations";
 import { loginCitizen } from "@/services/apiClient";
 import type { ProblemDetails } from "@/types/api";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectParam = searchParams.get("redirect");
+  const safeRedirect = sanitizeRedirectUrl(redirectParam);
 
   // Estados do formulário
   const [profile, setProfile] = useState<"citizen" | "server">("citizen");
@@ -68,7 +71,9 @@ export default function LoginPage() {
         localStorage.setItem("sosp_auth_token", res.token);
         localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
       }
-      if (profile === "server") {
+      if (safeRedirect) {
+        router.push(safeRedirect);
+      } else if (profile === "server") {
         router.push("/servidor/painel");
       } else {
         router.push("/cidadao/meus-agendamentos");
@@ -288,7 +293,7 @@ export default function LoginPage() {
             <p className="text-sm text-gray-600">
               Ainda não tem conta no SOSP?{" "}
               <Link
-                href="/cadastro"
+                href={safeRedirect ? `/cadastro?redirect=${encodeURIComponent(safeRedirect)}` : "/cadastro"}
                 className="font-bold text-[#1351B4] hover:underline focus:outline-none focus:ring-2 focus:ring-[#1351B4] rounded"
               >
                 Cadastre-se gratuitamente
@@ -304,6 +309,20 @@ export default function LoginPage() {
         onClose={() => setIsGovbrModalOpen(false)}
       />
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[calc(100vh-280px)] flex items-center justify-center py-12 px-4 bg-gray-50">
+          <p className="text-gray-500 text-sm">Carregando...</p>
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }
 
