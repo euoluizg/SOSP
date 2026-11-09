@@ -82,8 +82,7 @@ jobs:
               --base develop \
               --head "$INPUT_BRANCH" \
               --title "$INPUT_TITLE" \
-              --body "$INPUT_BODY" \
-              --reviewer "euoluizg")
+              --body "$INPUT_BODY")
             echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
             echo "Pull Request criado com sucesso pelo GitHub App: $PR_URL"
           fi
