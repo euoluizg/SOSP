@@ -300,6 +300,28 @@ class CatalogInMemoryRepository:
     def get_agencies(self) -> List[Dict[str, Any]]:
         return [a for a in self._agencies if a.get("isActive", True)]
 
+    def get_agency_by_id(self, agency_id: str) -> Optional[Dict[str, Any]]:
+        for a in self._agencies:
+            if a["id"] == agency_id:
+                return dict(a)
+        return None
+
+    def update_agency(self, agency_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        for a in self._agencies:
+            if a["id"] == agency_id:
+                if "name" in data:
+                    a["name"] = data["name"].strip()
+                if "acronym" in data:
+                    a["acronym"] = data["acronym"].strip().upper()
+                if "sphere" in data:
+                    a["sphere"] = data["sphere"].strip()
+                if "description" in data:
+                    a["description"] = data["description"].strip()
+                if "isActive" in data:
+                    a["isActive"] = bool(data["isActive"])
+                return dict(a)
+        return None
+
     def get_units(self, agency_id: Optional[str] = None) -> List[Dict[str, Any]]:
         units = [u for u in self._units if u.get("isActive", True)]
         if agency_id:
@@ -353,6 +375,35 @@ class CatalogDjangoORMRepository:
             "id": str(a.id),
             "name": a.name,
             "acronym": a.acronym,
+            "sphere": a.sphere,
+            "description": a.description or "",
+            "isActive": a.is_active,
+        }
+
+    def update_agency(self, agency_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        from .models import Agency
+        from django.utils import timezone
+        a = Agency.objects.filter(id=agency_id, deleted_at__isnull=True).first()
+        if not a:
+            return None
+        if "name" in data:
+            a.name = data["name"].strip()
+        if "acronym" in data:
+            a.acronym = data["acronym"].strip().upper()
+        if "sphere" in data:
+            a.sphere = data["sphere"].strip()
+        if "description" in data:
+            a.description = data["description"].strip()
+        if "isActive" in data:
+            a.is_active = bool(data["isActive"])
+            if not a.is_active and not a.deleted_at:
+                a.deleted_at = timezone.now()
+        a.save()
+        return {
+            "id": str(a.id),
+            "name": a.name,
+            "acronym": a.acronym,
+            "sphere": a.sphere,
             "description": a.description or "",
             "isActive": a.is_active,
         }

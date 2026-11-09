@@ -202,12 +202,13 @@ class AccountService:
             cpf=clean_cpf,
             full_name=citizen.get("fullName", ""),
             email=citizen.get("email", ""),
+            unit_id=citizen.get("unitId"),
         )
 
         # Registra sessão no servidor (accountsSession / RN-28)
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         citizen_repository.create_session(
-            subject_type="citizen",
+            subject_type=citizen.get("role", "citizen"),
             subject_id=citizen["id"],
             token_hash=token_hash,
         )
@@ -222,6 +223,8 @@ class AccountService:
                 "cpf": citizen["cpf"],
                 "email": citizen["email"],
                 "role": citizen.get("role", "citizen"),
+                "agencyId": citizen.get("agencyId"),
+                "unitId": citizen.get("unitId"),
             },
         }
 
