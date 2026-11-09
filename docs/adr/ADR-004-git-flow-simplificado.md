@@ -45,7 +45,7 @@ Etiquetas no GitHub: `area:backend` (`[BE]`), `area:frontend` (`[FE]`), `area:fu
 
 ### Padrão oficial de nomenclatura das Tasks (`[FE]` e `[BE]`) e Branches por Requisito
 
-Para garantir rastreabilidade direta com o [Documento de Requisitos](../Documento_de_Requisitos_Modelo_RF_v10.pdf) e evitar conflitos no Git entre Front-end (`Luiz Gustavo`) e Back-end (`Arthur Franco`), cada requisito funcional é dividido em duas tasks pareadas:
+Para garantir rastreabilidade direta com o [Documento de Requisitos](../Documento_de_Requisitos_SOSP_Final.pdf) e evitar conflitos no Git entre Front-end (`Luiz Gustavo`) e Back-end (`Arthur Franco`), cada requisito funcional é dividido em duas tasks pareadas:
 
 - **Padrão do Título (Issue / Card no Board / Pull Request):**
   `[<ÁREA>] [<RFXXX>] <Descrição da entrega na camada> (<Prioridade>)`
