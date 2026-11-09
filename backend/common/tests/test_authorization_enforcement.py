@@ -377,6 +377,77 @@ def test_server_citizen_appointments_list_is_strictly_scoped_to_unit(server_clie
     assert not any(a["id"] == "appt-ssp-tabuleiro" for a in appts)
 
 
+def test_server_without_scope_is_blocked_fail_closed(server_without_scope_client):
+    """Servidor sem escopo de órgão nem unidade é sumariamente bloqueado (Fail-Closed)."""
+    resp_appt = server_without_scope_client.get("/api/v1/appointments/appt-001")
+    assert resp_appt.status_code == 403
+    assert "sem escopo organizacional" in resp_appt.json()["detail"]
+
+    resp_list = server_without_scope_client.get("/api/v1/citizens/citizen-001/appointments")
+    assert resp_list.status_code == 403
+
+    resp_rep = server_without_scope_client.get("/api/v1/reports/appointments")
+    assert resp_rep.status_code == 403
+
+    resp_exp = server_without_scope_client.post("/api/v1/reports/exports", {"type": "csv"}, format="json")
+    assert resp_exp.status_code == 403
+
+
+def test_server_without_unit_cannot_access_appointments_fail_closed(server_without_unit_client):
+    """Servidor operacional com órgão mas sem unidade não pode acessar agendamentos presenciais (Fail-Closed)."""
+    resp_appt = server_without_unit_client.get("/api/v1/appointments/appt-001")
+    assert resp_appt.status_code == 403
+    assert "sem unidade de atendimento" in resp_appt.json()["detail"]
+
+    resp_list = server_without_unit_client.get("/api/v1/citizens/citizen-001/appointments")
+    assert resp_list.status_code == 403
+
+
+def test_manager_without_agency_is_blocked_fail_closed(manager_without_agency_client):
+    """Gestor institucional sem órgão de lotação atribuído é bloqueado (Fail-Closed)."""
+    resp_appt = manager_without_agency_client.get("/api/v1/appointments/appt-001")
+    assert resp_appt.status_code == 403
+    assert "sem órgão de lotação" in resp_appt.json()["detail"]
+
+    resp_list = manager_without_agency_client.get("/api/v1/citizens/citizen-001/appointments")
+    assert resp_list.status_code == 403
+
+    resp_rep = manager_without_agency_client.get("/api/v1/reports/appointments")
+    assert resp_rep.status_code == 403
+
+    resp_exp = manager_without_agency_client.post("/api/v1/reports/exports", {"type": "csv"}, format="json")
+    assert resp_exp.status_code == 403
+
+
+def test_manager_user_rbac_permissions_compatibility():
+    """Valida as classes de permissão RBAC (IsServerUser, IsManagerUser, IsInstitutionalUser) com gestores e servidores."""
+    from common.security.permissions import IsServerUser, IsManagerUser, IsInstitutionalUser
+    from common.security.authentication import SospUser
+
+    manager = SospUser(user_id="mgr-1", role="gestor", agency_id="orgao-ssp")
+    server = SospUser(user_id="srv-1", role="server", unit_id="unidade-centro")
+    citizen = SospUser(user_id="cit-1", role="citizen")
+
+    class DummyReq:
+        def __init__(self, user):
+            self.user = user
+
+    # Gestor
+    assert IsServerUser().has_permission(DummyReq(manager), None) is True
+    assert IsManagerUser().has_permission(DummyReq(manager), None) is True
+    assert IsInstitutionalUser().has_permission(DummyReq(manager), None) is True
+
+    # Servidor
+    assert IsServerUser().has_permission(DummyReq(server), None) is True
+    assert IsManagerUser().has_permission(DummyReq(server), None) is False  # Servidor não é gestor
+    assert IsInstitutionalUser().has_permission(DummyReq(server), None) is True
+
+    # Cidadão
+    assert IsServerUser().has_permission(DummyReq(citizen), None) is False
+    assert IsManagerUser().has_permission(DummyReq(citizen), None) is False
+    assert IsInstitutionalUser().has_permission(DummyReq(citizen), None) is False
+
+
 # -------------------------------------------------------------------------
 # 5. RBAC Institucional: Relatórios e Auditoria
 # -------------------------------------------------------------------------

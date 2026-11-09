@@ -28,6 +28,20 @@ class AppointmentsReportView(APIView):
             server_unit = str(getattr(request.user, "unit_id", "") or "")
             server_agency = str(getattr(request.user, "agency_id", "") or "")
 
+            # FAIL-CLOSED: Usuário institucional sem escopo é bloqueado
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Usuário institucional sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            if user_role in ("gestor", "manager") and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
             param_agency = request.query_params.get("agencyId")
             param_unit = request.query_params.get("unitId")
 
@@ -79,9 +93,26 @@ class ReportsExportView(APIView):
 
         user_scope = None
         if user_role in ("server", "servant", "servidor", "gestor", "manager"):
+            server_unit = str(getattr(request.user, "unit_id", "") or "")
+            server_agency = str(getattr(request.user, "agency_id", "") or "")
+
+            # FAIL-CLOSED: Sem escopo organizacional, bloqueia
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Usuário institucional sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            if user_role in ("gestor", "manager") and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
             user_scope = {
-                "agency_id": str(getattr(request.user, "agency_id", "") or ""),
-                "unit_id": str(getattr(request.user, "unit_id", "") or ""),
+                "agency_id": server_agency,
+                "unit_id": server_unit,
             }
 
         result = ReportsService.create_export(
