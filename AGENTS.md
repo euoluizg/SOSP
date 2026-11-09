@@ -13,7 +13,7 @@ Você está atuando no repositório oficial do **SOSP (Sistema de Orientação p
 
 Em qualquer conflito entre documentos, telas ou código, siga estritamente esta ordem de precedência:
 
-1. **1º — Requisitos Funcionais, Não-Funcionais e de Segurança:** [`docs/01-product-specs.md`](docs/01-product-specs.md), [`docs/Documento_de_Requisitos_Modelo_RF_v10.pdf`](docs/Documento_de_Requisitos_Modelo_RF_v10.pdf) e [`docs/use-cases/README.md`](docs/use-cases/README.md).
+1. **1º — Requisitos Funcionais, Não-Funcionais e de Segurança:** [`docs/01-product-specs.md`](docs/01-product-specs.md), [`docs/Documento_de_Requisitos_SOSP_Final.pdf`](docs/Documento_de_Requisitos_SOSP_Final.pdf) e [`docs/use-cases/README.md`](docs/use-cases/README.md).
 2. **2º — Decisões Arquiteturais (ADRs):** [`docs/adr/ADR-001`](docs/adr/ADR-001-monolito-modular-django-nextjs.md) a [`docs/adr/ADR-008`](docs/adr/ADR-008-supabase-postgresql-gerenciado.md).
 3. **3º — Contratos Técnicos Executáveis:** [`docs/api/openapi.yaml`](docs/api/openapi.yaml) (`OpenAPI 3.0.3`) e [`docs/database/schema.sql`](docs/database/schema.sql) (`PostgreSQL 17`).
 4. **4º — Arquitetura e Engenharia:** [`docs/03-architecture.md`](docs/03-architecture.md), [`docs/04-data-api.md`](docs/04-data-api.md) e [`docs/05-engineering-devops.md`](docs/05-engineering-devops.md).
