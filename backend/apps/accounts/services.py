@@ -1,7 +1,9 @@
 import re
+import secrets
 import datetime
 import hashlib
 from typing import Any, Dict, List, Tuple
+from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from common.exceptions import ProblemDetailsException
 from common.security.authentication import generate_sosp_token
@@ -236,9 +238,18 @@ class AccountService:
             # Retorna sucesso neutro para não expor existência de usuário (OWASP)
             return {"message": "Se o CPF estiver cadastrado, um código de verificação será enviado por e-mail."}
 
-        code = "123456"  # Código simulado para ambiente de desenvolvimento/testes
+        # Gera código aleatório criptograficamente seguro de 6 dígitos
+        code = f"{secrets.randbelow(900000) + 100000}"
         citizen_repository.set_recovery_code(clean_cpf, code)
-        return {"message": "Código de verificação enviado por e-mail com sucesso.", "codeSimulated": code}
+
+        res: Dict[str, str] = {
+            "message": "Código de verificação enviado por e-mail com sucesso."
+        }
+        django_env = getattr(settings, "DJANGO_ENV", "development").lower()
+        is_test_or_dev = getattr(settings, "DEBUG", False) or getattr(settings, "TESTING", False) or django_env in ("development", "test")
+        if is_test_or_dev and django_env not in ("staging", "production"):
+            res["codeSimulated"] = code
+        return res
 
     @staticmethod
     def reset_password(cpf: str, code: str, new_password: str) -> Dict[str, str]:

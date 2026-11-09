@@ -6,6 +6,7 @@ class CitizenRegisterSerializer(serializers.Serializer):
     socialName = serializers.CharField(max_length=255, required=False, allow_blank=True)
     birthDate = serializers.CharField(max_length=10)
     gender = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    genderDescription = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
     motherName = serializers.CharField(max_length=255)
     rg = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
     rgIssuer = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")

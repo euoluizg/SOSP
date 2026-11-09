@@ -13,9 +13,21 @@ por isso os testes usam fixtures autenticadas para os diferentes perfis RBAC do 
 import pytest
 from rest_framework.test import APIClient
 from common.security.authentication import generate_sosp_token
+from apps.accounts.repositories import get_demo_password
+from apps.scheduling.repositories import scheduling_repository
 
 CITIZEN_SEED_CPF = "11144477705"
-CITIZEN_SEED_PASSWORD = "S0sp@2026!Fort3"
+CITIZEN_SEED_PASSWORD = get_demo_password()
+
+
+@pytest.fixture(autouse=True)
+def seed_scheduling_test_data():
+    """Garante que testes que exercitam agendamentos disponham de fixtures controladas sob demanda."""
+    if hasattr(scheduling_repository, "seed_test_fixtures"):
+        scheduling_repository.seed_test_fixtures()
+    yield
+    if hasattr(scheduling_repository, "_appointments"):
+        scheduling_repository._appointments.clear()
 
 
 @pytest.fixture

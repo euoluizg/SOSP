@@ -74,3 +74,11 @@ def test_attachment_upload_size_limit(auth_client):
     )
     assert resp_err.status_code == 400
     assert "10 mb" in resp_err.json()["detail"].lower()
+
+
+def test_fresh_citizen_starts_with_zero_appointments():
+    """Cidadão recém-cadastrado inicia sem agendamentos e sem histórico (Zero Fakes)."""
+    from apps.scheduling.repositories import SchedulingInMemoryRepository
+    fresh_repo = SchedulingInMemoryRepository()
+    assert fresh_repo.list_by_citizen("citizen-fresh-unregistered") == []
+    assert fresh_repo.list_all() == []

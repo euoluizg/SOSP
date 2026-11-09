@@ -1,14 +1,25 @@
+import os
 import time
 import datetime
+import secrets
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 
+DEFAULT_DEMO_CREDENTIAL = os.environ.get("DEMO_ACCOUNTS_PASSWORD")
+if not DEFAULT_DEMO_CREDENTIAL:
+    # Gera credencial dinâmica em memória para evitar qualquer padrão fixo em código
+    DEFAULT_DEMO_CREDENTIAL = f"A1!{secrets.token_urlsafe(16)}"
+
+def get_demo_password() -> str:
+    """Retorna a credencial temporária isolada para testes e demonstração local."""
+    return DEFAULT_DEMO_CREDENTIAL
+
 class CitizenInMemoryRepository:
     """Repositório em memória para Cidadãos e Usuários (sem banco nesta fase)."""
     def __init__(self):
-        # Usuários sintéticos oficiais para demonstração dos 3 perfis e testes
-        hashed_password = make_password("S0sp@2026!Fort3")
+        # Usuários sintéticos para demonstração dos 3 perfis e testes locais com credencial dinâmica
+        hashed_password = make_password(get_demo_password())
         self._citizens: Dict[str, Dict[str, Any]] = {
             "citizen-001": {
                 "id": "citizen-001",
@@ -309,11 +320,39 @@ class CitizenDjangoORMRepository:
                     status_code=503,
                 )
 
-        # 2. Em SQLite (ambiente de teste local sem PostgreSQL / sem RLS)
+        # 2. Em SQLite ou fallback ORM (busca Citizen ou InternalUser)
+        from .models import Citizen, InternalUser
         c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).only(
             "id", "cpf", "full_name", "email", "password_hash", "is_active", "blocked_until", "login_attempts"
         ).first()
-        return self._to_dict(c) if c else None
+        if c:
+            return self._to_dict(c)
+
+        # 3. Busca por Usuário Interno (servidores, gestores, administradores)
+        u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
+        if u:
+            role = u.role
+            if role in ("servant", "server"):
+                role = "server"
+            elif role in ("manager", "gestor"):
+                role = "gestor"
+
+            return {
+                "id": str(u.id),
+                "fullName": u.full_name,
+                "cpf": clean_cpf,
+                "email": u.email,
+                "passwordHash": u.password_hash,
+                "isActive": u.is_active,
+                "blockedUntil": None,
+                "loginAttempts": 0,
+                "role": role,
+                "agencyId": str(u.agency_id) if u.agency_id else None,
+                "unitId": None,
+                "canManageCatalog": u.can_manage_catalog,
+            }
+
+        return None
 
     def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         from .models import Citizen
@@ -330,9 +369,22 @@ class CitizenDjangoORMRepository:
         gender_id = data.get("genderId")
         gender = Gender.objects.filter(id=gender_id).first() if gender_id else None
         if not gender:
-            gender = Gender.objects.first()
+            gender_val = data.get("gender", "")
+            if gender_val == "F":
+                gender = Gender.objects.filter(name="Feminino").first()
+            elif gender_val == "M":
+                gender = Gender.objects.filter(name="Masculino").first()
+            elif gender_val == "O":
+                gender = Gender.objects.filter(name="Outro").first()
+                if not gender:
+                    gender = Gender.objects.create(name="Outro", sort_order=3)
+            elif gender_val == "N":
+                gender = Gender.objects.filter(name="Não Informado").first()
+
             if not gender:
-                gender = Gender.objects.create(name="Não Informado", sort_order=99)
+                gender = Gender.objects.first()
+                if not gender:
+                    gender = Gender.objects.create(name="Não Informado", sort_order=99)
 
         citizen_id = data.get("id")
         citizen = None

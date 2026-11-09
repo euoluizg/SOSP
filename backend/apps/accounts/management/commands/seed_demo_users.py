@@ -1,13 +1,42 @@
-from django.core.management.base import BaseCommand
+import os
+import secrets
+import string
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.hashers import make_password
 from apps.accounts.models import Citizen, InternalUser, Gender
 
 class Command(BaseCommand):
     help = "Cria ou atualiza com idempotência os usuários sintéticos de demonstração do SOSP (cidadãos, servidores e gestores)."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--password",
+            type=str,
+            default=None,
+            help="Senha temporária explícita para as contas sintéticas em ambiente de desenvolvimento local.",
+        )
+
     def handle(self, *args, **options):
+        django_env = getattr(settings, "DJANGO_ENV", "development").lower()
+        if django_env in ("staging", "production") and not getattr(settings, "ALLOW_DEMO_SEED", False):
+            raise CommandError(
+                f"Operação bloqueada por política de segurança: O seed de usuários de demonstração com credenciais "
+                f"sintéticas é estritamente proibido no ambiente '{django_env}'. Contas privilegiadas demonstrativas "
+                "não devem ser provisionadas em ambientes acessíveis ou de produção."
+            )
+
         self.stdout.write("Inicializando seed seguro de usuários de demonstração...")
-        pwd_hash = make_password("S0sp@2026!Fort3")
+
+        # Obtém credencial de demonstração: via flag, variável de ambiente ou gerada dinamicamente
+        demo_auth_secret = options.get("password") or os.environ.get("DEMO_ACCOUNTS_PASSWORD")
+        is_generated = False
+        if not demo_auth_secret:
+            token_entropy = secrets.token_urlsafe(16)
+            demo_auth_secret = f"A1!{token_entropy}"
+            is_generated = True
+
+        pwd_hash = make_password(demo_auth_secret)
 
         # 1. Garante gênero padrão
         gender_na, _ = Gender.objects.get_or_create(
@@ -132,3 +161,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"  [Interno] {action}: {u.name} (Role: {u.role})"))
 
         self.stdout.write(self.style.SUCCESS("✓ Seed de usuários concluído com sucesso. Zero agendamentos criados."))
+        if is_generated:
+            self.stdout.write(self.style.WARNING(
+                f"\n[AVISO DE SEGURANÇA] Credencial temporária gerada dinamicamente para esta execução local:\n"
+                f"  Credencial: {demo_auth_secret}\n"
+                f"Guarde esta credencial se desejar realizar testes manuais. Nenhuma senha estática está gravada no código versionado."
+            ))
