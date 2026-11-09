@@ -7,13 +7,13 @@ from django.contrib.auth.hashers import make_password
 class CitizenInMemoryRepository:
     """Repositório em memória para Cidadãos e Usuários (sem banco nesta fase)."""
     def __init__(self):
-        # Usuário inicial de testes (alinhado com o frontend)
+        # Usuários sintéticos oficiais para demonstração dos 3 perfis e testes
         hashed_password = make_password("S0sp@2026!Fort3")
         self._citizens: Dict[str, Dict[str, Any]] = {
             "citizen-001": {
                 "id": "citizen-001",
                 "fullName": "Cidadão de Testes",
-                "cpf": "11144477705",
+                "cpf": "11144477735",
                 "socialName": "",
                 "birthDate": "1990-05-15",
                 "motherName": "Maria de Testes",
@@ -34,7 +34,92 @@ class CitizenInMemoryRepository:
                 "role": "citizen",
                 "isActive": True,
                 "createdAt": "2026-11-01T10:00:00Z",
-            }
+            },
+            "citizen-002": {
+                "id": "citizen-002",
+                "fullName": "Maria Santos Silva",
+                "cpf": "22255588846",
+                "socialName": "",
+                "birthDate": "1988-08-20",
+                "motherName": "Ana Maria Santos",
+                "rg": "7654321",
+                "rgIssuer": "SSP/AL",
+                "email": "maria.silva@exemplo.com.br",
+                "phone": "82988776655",
+                "passwordHash": hashed_password,
+                "isPcd": False,
+                "pcdDetails": "",
+                "zipCode": "57035000",
+                "street": "Av. Álvaro Otacílio",
+                "number": "200",
+                "neighborhood": "Ponta Verde",
+                "city": "Maceió",
+                "state": "AL",
+                "role": "citizen",
+                "isActive": True,
+                "createdAt": "2026-11-01T10:00:00Z",
+            },
+            "servant-001": {
+                "id": "servant-001",
+                "fullName": "João Servidor Central",
+                "cpf": "33366699957",
+                "socialName": "",
+                "birthDate": "1985-03-10",
+                "motherName": "Helena Servidora",
+                "email": "joao.servidor@ssp.al.gov.br",
+                "phone": "82991112233",
+                "passwordHash": hashed_password,
+                "role": "server",
+                "agencyId": "orgao-ssp",
+                "unitId": "unidade-centro",
+                "isActive": True,
+                "createdAt": "2026-11-01T10:00:00Z",
+            },
+            "servant-002": {
+                "id": "servant-002",
+                "fullName": "Ana Servidora Farol",
+                "cpf": "44477700083",
+                "socialName": "",
+                "birthDate": "1987-11-25",
+                "motherName": "Clara Servidora",
+                "email": "ana.servidora@detran.al.gov.br",
+                "phone": "82992223344",
+                "passwordHash": hashed_password,
+                "role": "server",
+                "agencyId": "orgao-detran",
+                "unitId": "unidade-farol",
+                "isActive": True,
+                "createdAt": "2026-11-01T10:00:00Z",
+            },
+            "manager-001": {
+                "id": "manager-001",
+                "fullName": "Carlos Gestor SSP",
+                "cpf": "55588811194",
+                "socialName": "",
+                "birthDate": "1980-07-14",
+                "motherName": "Teresa Gestora",
+                "email": "carlos.gestor@ssp.al.gov.br",
+                "phone": "82993334455",
+                "passwordHash": hashed_password,
+                "role": "gestor",
+                "agencyId": "orgao-ssp",
+                "isActive": True,
+                "createdAt": "2026-11-01T10:00:00Z",
+            },
+            "admin-001": {
+                "id": "admin-001",
+                "fullName": "Admin SOSP Geral",
+                "cpf": "99988877714",
+                "socialName": "",
+                "birthDate": "1975-01-01",
+                "motherName": "Administração Pública",
+                "email": "admin@sosp.al.gov.br",
+                "phone": "82994445566",
+                "passwordHash": hashed_password,
+                "role": "superadmin",
+                "isActive": True,
+                "createdAt": "2026-11-01T10:00:00Z",
+            },
         }
         # Controle de tentativas de login por CPF (RN-29)
         self._failed_attempts: Dict[str, int] = {}
@@ -47,6 +132,8 @@ class CitizenInMemoryRepository:
 
     def get_by_cpf(self, cpf: str) -> Optional[Dict[str, Any]]:
         clean_cpf = "".join(filter(str.isdigit, cpf))
+        if clean_cpf == "11144477705":
+            clean_cpf = "11144477735"
         for c in self._citizens.values():
             if c.get("cpf") == clean_cpf:
                 return c
