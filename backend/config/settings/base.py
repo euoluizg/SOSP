@@ -195,6 +195,12 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "common.security.authentication.SospTokenAuthentication",
     ],
+    # Política deny-by-default (RF-01/RF-02/RN-28): toda view exige autenticação.
+    # Endpoints públicos (health, login, cadastro, recuperação de senha, catálogo,
+    # slots e FAQ) declaram AllowAny explicitamente em permission_classes.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],

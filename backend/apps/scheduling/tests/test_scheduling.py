@@ -1,9 +1,9 @@
 import pytest
 import re
-from rest_framework.test import APIClient
 from apps.scheduling.services import SchedulingService
 
-client = APIClient()
+# Endpoints de agendamento exigem autenticação (REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES).
+# O fixture `auth_client` (backend/conftest.py) autentica via /auth/login.
 
 def test_get_slots_30_minutes_interval():
     # Segunda-feira útil
@@ -20,7 +20,7 @@ def test_slots_weekend_closed():
     slots = SchedulingService.get_slots_for_unit("unidade-centro", "2026-11-15")
     assert len(slots) == 0
 
-def test_create_appointment_and_protocol_format():
+def test_create_appointment_and_protocol_format(auth_client):
     payload = {
         "serviceId": "servico-isencao-ipva",
         "unitId": "unidade-centro",
@@ -29,11 +29,11 @@ def test_create_appointment_and_protocol_format():
         "citizenId": "citizen-002",
     }
     # Sem Idempotency-Key deve falhar com 400 (ADR-005)
-    resp_no_key = client.post("/api/v1/appointments/", payload, format="json")
+    resp_no_key = auth_client.post("/api/v1/appointments/", payload, format="json")
     assert resp_no_key.status_code == 400
 
     # Com Idempotency-Key deve criar com sucesso
-    response = client.post("/api/v1/appointments/", payload, format="json", HTTP_IDEMPOTENCY_KEY="idemp-key-test-001")
+    response = auth_client.post("/api/v1/appointments/", payload, format="json", HTTP_IDEMPOTENCY_KEY="idemp-key-test-001")
     assert response.status_code == 201
     data = response.json()
     assert "protocolNumber" in data
@@ -41,7 +41,7 @@ def test_create_appointment_and_protocol_format():
     assert re.match(r"^\d{8}-\d{4}$", data["protocolNumber"])
     assert data["status"] == "scheduled"
 
-def test_cancel_appointment():
+def test_cancel_appointment(auth_client):
     # Cria agendamento para cancelamento
     appt = SchedulingService.create_appointment(
         citizen_id="citizen-cancel-test",
@@ -52,14 +52,14 @@ def test_cancel_appointment():
     )
     appt_id = appt["id"]
 
-    response = client.post(f"/api/v1/appointments/{appt_id}/cancel", {"reason": "Imprevisto pessoal"}, format="json")
+    response = auth_client.post(f"/api/v1/appointments/{appt_id}/cancel", {"reason": "Imprevisto pessoal"}, format="json")
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
 
-def test_attachment_upload_size_limit():
+def test_attachment_upload_size_limit(auth_client):
     protocol = "20261105-1042"
     # Arquivo dentro do limite de 10 MB
-    resp_ok = client.post(
+    resp_ok = auth_client.post(
         f"/api/v1/protocols/{protocol}/documents",
         {"fileName": "rg_frente_verso.pdf", "sizeMb": 2.5},
         format="json",
@@ -67,11 +67,10 @@ def test_attachment_upload_size_limit():
     assert resp_ok.status_code == 201
 
     # Arquivo acima do limite de 10 MB (RS-04)
-    resp_err = client.post(
+    resp_err = auth_client.post(
         f"/api/v1/protocols/{protocol}/documents",
         {"fileName": "arquivo_gigante.pdf", "sizeMb": 15.0},
         format="json",
     )
     assert resp_err.status_code == 400
     assert "10 mb" in resp_err.json()["detail"].lower()
-
