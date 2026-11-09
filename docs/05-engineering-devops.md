@@ -438,7 +438,7 @@ O repositório adota **Git Flow simplificado**: `main` (produção) + `develop` 
 
 **Separação por área (`FE` / `BE` / `FULL`) e Nomenclatura de Tasks**
 
-Para manter rastreabilidade direta com o [Documento de Requisitos](Documento_de_Requisitos_Modelo_RF_v10.pdf) e evitar conflitos no Git, cada Requisito Funcional é dividido em duas tasks independentes (`[FE]` para Front-end e `[BE]` para Back-end):
+Para manter rastreabilidade direta com o [Documento de Requisitos](Documento_de_Requisitos_SOSP_Final.pdf) e evitar conflitos no Git, cada Requisito Funcional é dividido em duas tasks independentes (`[FE]` para Front-end e `[BE]` para Back-end):
 
 - **Título do Card / Issue / Pull Request:**
   `[<FE|BE>] [<RFXXX>] <Descrição da entrega na camada> (<Prioridade>)`

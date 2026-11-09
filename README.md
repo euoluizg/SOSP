@@ -16,7 +16,7 @@ A partir de uma busca em linguagem simples, o sistema entrega uma **ficha orient
 | Artefato | Acesso | Descrição |
 |---|---|---|
 | **Índice Geral da Documentação** | [`docs/README.md`](docs/README.md) | Ponto de partida oficial (Pilar 0) e guia de leitura por perfil |
-| **Documento de Requisitos (PDF)** | [`Documento_de_Requisitos_Modelo_RF_v10.pdf`](docs/Documento_de_Requisitos_Modelo_RF_v10.pdf) | Especificação formal de requisitos (RF, RNF, RS, Matriz de Risco, Rastreabilidade e Pontos de Função) |
+| **Documento de Requisitos (PDF)** | [`Documento_de_Requisitos_SOSP_Final.pdf`](docs/Documento_de_Requisitos_SOSP_Final.pdf) | Especificação formal de requisitos (RF, RNF, RS, Matriz de Risco, Rastreabilidade e Pontos de Função) |
 | **Protótipo Oficial (Figma)** | [Figma `SOSP`](https://www.figma.com/design/P8Pf9aZiagXQulJpP2guqz/SOSP?node-id=0-1) | 30 telas no total (15 cidadão web+mobile, 5 servidor, 6 admin e 4 transversais — 45 frames) |
 | **Protótipo Consolidado (PDF)** | [`sosp-prototipo-2026-11-01.pdf`](docs/design/exports/sosp-prototipo-2026-11-01.pdf) | PDF consolidado com a capa e os 45 frames exportados das 30 telas |
 | **Índice de Telas e Node IDs** | [`docs/design/README.md`](docs/design/README.md) | Mapeamento das 30 telas (45 frames) com RF, UC e `node-id` do Figma |

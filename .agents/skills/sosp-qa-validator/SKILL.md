@@ -15,7 +15,7 @@ Use esta skill para auditar se uma entrega (`[FE]`, `[BE]` ou requisito completo
 
 1. Abra [`docs/01-product-specs.md`](../../../docs/01-product-specs.md) e localize os Critérios de Aceite (`CA`) e Regras de Negócio (`RN`) do requisito auditado.
 2. Verifique item a item:
-   - **Mensagens literais:** As mensagens de erro, estado vazio e confirmação no código coincidem caractere por caractere com o PDF de Requisitos (`Documento_de_Requisitos_Modelo_RF_v10.pdf`)?
+   - **Mensagens literais:** As mensagens de erro, estado vazio e confirmação no código coincidem caractere por caractere com o PDF de Requisitos (`Documento_de_Requisitos_SOSP_Final.pdf`)?
    - **Paginação e Ordenação:** A listagem retorna **10 registros por página** (`RN-05`) e respeita a ordenação (relevância na busca `RF-06` ou alfabética `A–Z` nos cadastros)?
    - **Exclusão Lógica e Auditoria:** A remoção preserva o registro no banco (`isActive = False`, `deletedAt != NULL`, `RN-40`) e grava evento em `auditEvent` (`RN-39`)?
 
