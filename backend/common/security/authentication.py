@@ -82,7 +82,11 @@ class SospUser:
 
     @property
     def is_server(self) -> bool:
-        return self.role in ("server", "servant", "servidor")
+        return self.role in ("server", "servant", "servidor", "gestor", "manager")
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role in ("gestor", "manager")
 
     @property
     def is_admin(self) -> bool:
@@ -90,7 +94,17 @@ class SospUser:
 
     @property
     def is_staff(self) -> bool:
-        return self.role in ("server", "admin", "superadmin", "servant", "administrator", "servidor", "administrador")
+        return self.role in (
+            "server",
+            "admin",
+            "superadmin",
+            "servant",
+            "administrator",
+            "servidor",
+            "administrador",
+            "gestor",
+            "manager",
+        )
 
     @property
     def is_superuser(self) -> bool:

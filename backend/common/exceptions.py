@@ -16,6 +16,7 @@ class ProblemDetailsException(APIException):
         type_uri: str = "about:blank",
         status_code: int = 400,
         errors: Optional[List[Dict[str, str]]] = None,
+        headers: Optional[Dict[str, str]] = None,
     ):
         super().__init__(detail)
         self.detail = detail
@@ -23,6 +24,7 @@ class ProblemDetailsException(APIException):
         self.type_uri = type_uri
         self.status_code = status_code
         self.errors = errors or []
+        self.headers = headers
 
 def problem_details_exception_handler(exc: Exception, context: Dict[str, Any]) -> Optional[Response]:
     """Handler global que padroniza todas as exceções em RFC 7807 (application/problem+json)."""
@@ -42,7 +44,7 @@ def problem_details_exception_handler(exc: Exception, context: Dict[str, Any]) -
         }
         if exc.errors:
             payload["errors"] = exc.errors
-        return Response(payload, status=exc.status_code, content_type="application/problem+json")
+        return Response(payload, status=exc.status_code, headers=exc.headers, content_type="application/problem+json")
 
     if response is not None:
         status_code = response.status_code
@@ -65,6 +67,7 @@ def problem_details_exception_handler(exc: Exception, context: Dict[str, Any]) -
             401: "Não autenticado",
             403: "Acesso não autorizado",
             404: "Recurso não encontrado",
+            405: "Método não permitido",
             409: "Conflito de estado",
             422: "Erro de validação",
             429: "Muitas requisições",

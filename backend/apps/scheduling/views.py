@@ -12,7 +12,9 @@ def check_appointment_access(request_user, appt) -> None:
     """
     Valida autorização de acesso ao agendamento (ownership e RBAC — ADR-003, RS-01 a RS-03, RN-36):
     - Cidadão: apenas o proprietário (appt['citizenId'] == user.id). Se não for, 404 (anti-enumeração / STRIDE).
-    - Servidor: apenas se for da mesma unidade (appt['unitId'] == user.unit_id) ou órgão (RN-36). Se não for, 403.
+    - Servidor operacional (com unidade de lotação): acesso restrito ESTRITAMENTE à sua unidade (RN-36).
+      Pertencer ao mesmo órgão NÃO autoriza acesso a outras unidades. Se não for de sua unidade, 403.
+    - Gestor institucional (com órgão e sem unidade específica): restrito ao órgão (RN-36). Se não for de seu órgão, 403.
     - Administrador: acesso irrestrito.
     """
     user_role = getattr(request_user, "role", "citizen")
@@ -27,22 +29,53 @@ def check_appointment_access(request_user, appt) -> None:
             )
         return
 
-    if user_role in ("server", "servant", "servidor"):
+    if user_role in ("server", "servant", "servidor", "gestor", "manager"):
         server_unit = str(getattr(request_user, "unit_id", "") or "")
         server_agency = str(getattr(request_user, "agency_id", "") or "")
         appt_unit = str(appt.get("unitId") or "")
         appt_agency = str(appt.get("agencyId") or "")
 
-        unit_match = bool(server_unit and appt_unit and server_unit == appt_unit)
-        agency_match = bool(server_agency and appt_agency and server_agency == appt_agency)
+        # FAIL-CLOSED Gestor institucional: opera estritamente no nível do seu órgão (RN-36, ADR-003)
+        if user_role in ("gestor", "manager"):
+            if not server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            if not appt_agency or appt_agency != server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional não possui permissão para acessar recursos fora do seu órgão de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            return
 
-        if not (unit_match or agency_match):
+        # FAIL-CLOSED: Servidor operacional sem nenhum escopo organizacional válido é sumariamente bloqueado (403)
+        if not server_unit and not server_agency:
             raise ProblemDetailsException(
-                detail="Servidor não possui permissão para acessar recursos fora de sua unidade/órgão de lotação (RN-36).",
+                detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
                 status_code=403,
                 title="Acesso não autorizado",
             )
-        return
+
+        # Servidor operacional (com unidade de lotação): acesso ESTRITAMENTE restrito à sua unidade (RN-36)
+        # Pertencer ao mesmo órgão NÃO concede acesso a outras unidades.
+        if server_unit:
+            if not appt_unit or appt_unit != server_unit:
+                raise ProblemDetailsException(
+                    detail="Servidor não possui permissão para acessar agendamentos de outra unidade, mesmo que do mesmo órgão (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            return
+
+        # Servidor operacional sem unidade de lotação atribuída: fail-closed!
+        raise ProblemDetailsException(
+            detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+            status_code=403,
+            title="Acesso não autorizado",
+        )
 
     if user_role in ("admin", "administrator", "superadmin", "administrador"):
         return
@@ -166,17 +199,37 @@ class CitizenAppointmentsView(APIView):
             appts = scheduling_repository.list_by_citizen(citizen_id)
             return Response(appts, status=status.HTTP_200_OK)
 
-        # Servidor só lista agendamentos da sua unidade ou órgão (RN-36)
-        if user_role in ("server", "servant", "servidor"):
-            appts = scheduling_repository.list_by_citizen(citizen_id)
+        # Servidor ou Gestor lista agendamentos da sua unidade ou órgão (RN-36)
+        if user_role in ("server", "servant", "servidor", "gestor", "manager"):
             server_unit = str(getattr(request.user, "unit_id", "") or "")
             server_agency = str(getattr(request.user, "agency_id", "") or "")
-            filtered = [
-                a
-                for a in appts
-                if (server_unit and str(a.get("unitId") or "") == server_unit)
-                or (server_agency and str(a.get("agencyId") or "") == server_agency)
-            ]
+
+            # FAIL-CLOSED: Sem escopo organizacional, bloqueia
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
+            appts = scheduling_repository.list_by_citizen(citizen_id)
+            if user_role in ("gestor", "manager"):
+                if not server_agency:
+                    raise ProblemDetailsException(
+                        detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                        status_code=403,
+                        title="Acesso não autorizado",
+                    )
+                filtered = [a for a in appts if str(a.get("agencyId") or "") == server_agency]
+            elif server_unit:
+                filtered = [a for a in appts if str(a.get("unitId") or "") == server_unit]
+            else:
+                # Servidor operacional sem unidade
+                raise ProblemDetailsException(
+                    detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
             return Response(filtered, status=status.HTTP_200_OK)
 
         # Administrador: acesso irrestrito
@@ -217,6 +270,7 @@ class ProtocolDirectView(APIView):
             status_code=405,
             title="Método não permitido",
             type_uri="https://sosp.al.gov.br/errors/405",
+            headers={"Allow": "OPTIONS"},
         )
 
     def post(self, request, protocol_number):

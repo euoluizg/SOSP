@@ -23,7 +23,7 @@ class IsCitizen(BasePermission):
 
 
 class IsServerUser(BasePermission):
-    """Permite acesso a servidores lotados e administradores."""
+    """Permite acesso a servidores lotados, gestores institucionais e administradores (ADR-003)."""
 
     def has_permission(self, request, view):
         return bool(
@@ -34,6 +34,27 @@ class IsServerUser(BasePermission):
                 "server",
                 "servant",
                 "servidor",
+                "gestor",
+                "manager",
+                "admin",
+                "administrator",
+                "superadmin",
+                "administrador",
+            )
+        )
+
+
+class IsManagerUser(BasePermission):
+    """Permite acesso exclusivamente a gestores institucionais e administradores (ADR-003)."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and getattr(request.user, "is_authenticated", False)
+            and getattr(request.user, "role", None)
+            in (
+                "gestor",
+                "manager",
                 "admin",
                 "administrator",
                 "superadmin",
@@ -61,7 +82,7 @@ class IsAdminUser(BasePermission):
 
 class IsInstitutionalUser(BasePermission):
     """
-    Permite acesso a servidores e administradores (usuários institucionais).
+    Permite acesso a usuários institucionais: servidores, gestores e administradores (ADR-003).
     Bloqueia cidadãos e anônimos (retorna 403 para cidadão autenticado).
     """
 
@@ -74,6 +95,8 @@ class IsInstitutionalUser(BasePermission):
                 "server",
                 "servant",
                 "servidor",
+                "gestor",
+                "manager",
                 "admin",
                 "administrator",
                 "superadmin",

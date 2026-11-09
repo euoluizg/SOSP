@@ -90,6 +90,91 @@ def server_other_unit_client():
 
 
 @pytest.fixture
+def server_ssp_tabuleiro_client():
+    """Cliente DRF autenticado como servidor da unidade-tabuleiro do MESMO órgão SSP."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-003",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id="unidade-tabuleiro",
+        full_name="Servidor Tabuleiro SSP",
+        email="servidor.tabuleiro@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def manager_ssp_client():
+    """Cliente DRF autenticado como gestor institucional do órgão SSP (sem unidade específica)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="manager-001",
+        role="gestor",
+        agency_id="orgao-ssp",
+        unit_id=None,
+        full_name="Gestor Institucional SSP",
+        email="gestor.ssp@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_without_scope_client():
+    """Cliente DRF autenticado como servidor sem nenhum escopo organizacional (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-no-scope",
+        role="server",
+        agency_id=None,
+        unit_id=None,
+        full_name="Servidor Sem Escopo",
+        email="server.noscope@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_without_unit_client():
+    """Cliente DRF autenticado como servidor com órgão mas sem unidade (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-no-unit",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id=None,
+        full_name="Servidor Sem Unidade",
+        email="server.nounit@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def manager_without_agency_client():
+    """Cliente DRF autenticado como gestor sem órgão atribuído (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="manager-no-agency",
+        role="gestor",
+        agency_id=None,
+        unit_id=None,
+        full_name="Gestor Sem Órgão",
+        email="manager.noagency@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
 def admin_client():
     """Cliente DRF autenticado como administrador do sistema."""
     client = APIClient()
