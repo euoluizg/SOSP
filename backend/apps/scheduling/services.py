@@ -112,6 +112,7 @@ class SchedulingService:
             "citizenCpfMasked": "***.444.777-**",
             "serviceId": service_id,
             "serviceName": service["name"],
+            "agencyId": service.get("agencyId") or unit.get("agencyId") or "orgao-ssp",
             "agencyName": service.get("agencyName", "Governo de Alagoas"),
             "unitId": unit_id,
             "unitName": unit["name"],

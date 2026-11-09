@@ -63,10 +63,12 @@ class SospUser:
         full_name: str = "",
         email: str = "",
         is_active: bool = True,
+        unit_id: str | uuid.UUID | None = None,
     ):
         self.id = uuid.UUID(str(user_id)) if isinstance(user_id, str) and len(user_id) == 36 else user_id
         self.role = role
-        self.agency_id = uuid.UUID(str(agency_id)) if isinstance(agency_id, str) and len(str(agency_id)) == 36 else agency_id
+        self.agency_id = uuid.UUID(str(agency_id)) if isinstance(agency_id, str) and len(str(agency_id)) == 36 else (str(agency_id) if agency_id else None)
+        self.unit_id = uuid.UUID(str(unit_id)) if isinstance(unit_id, str) and len(str(unit_id)) == 36 else (str(unit_id) if unit_id else None)
         self.cpf = cpf
         self.full_name = full_name
         self.email = email
@@ -75,15 +77,27 @@ class SospUser:
         self.is_anonymous = False
 
     @property
+    def is_citizen(self) -> bool:
+        return self.role in ("citizen", "cidadao")
+
+    @property
+    def is_server(self) -> bool:
+        return self.role in ("server", "servant", "servidor")
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role in ("admin", "administrator", "superadmin", "administrador")
+
+    @property
     def is_staff(self) -> bool:
-        return self.role in ("server", "admin", "superadmin", "servant", "administrator")
+        return self.role in ("server", "admin", "superadmin", "servant", "administrator", "servidor", "administrador")
 
     @property
     def is_superuser(self) -> bool:
-        return self.role in ("superadmin", "administrator")
+        return self.role in ("superadmin", "administrator", "administrador")
 
     def __str__(self) -> str:
-        return f"SospUser(id={self.id}, role={self.role}, agency={self.agency_id})"
+        return f"SospUser(id={self.id}, role={self.role}, agency={self.agency_id}, unit={self.unit_id})"
 
 
 def generate_sosp_token(
@@ -94,6 +108,7 @@ def generate_sosp_token(
     full_name: str = "",
     email: str = "",
     expires_in_seconds: int = 1800,  # 30 minutos (RN-28)
+    unit_id: str | uuid.UUID | None = None,
 ) -> str:
     """
     Gera um token criptográfico assinado HMAC-SHA256 (compatível com padrão JWT HS256).
@@ -105,6 +120,7 @@ def generate_sosp_token(
         "sub": str(user_id),
         "role": role,
         "agency_id": str(agency_id) if agency_id else None,
+        "unit_id": str(unit_id) if unit_id else None,
         "cpf": cpf,
         "name": full_name,
         "email": email,
@@ -187,11 +203,13 @@ class SospTokenAuthentication(BaseAuthentication):
         user_id = payload.get("sub")
         role = payload.get("role", "citizen")
         agency_id = payload.get("agency_id")
+        unit_id = payload.get("unit_id")
 
         user = SospUser(
             user_id=user_id,
             role=role,
             agency_id=agency_id,
+            unit_id=unit_id,
             cpf=payload.get("cpf", ""),
             full_name=payload.get("name", ""),
             email=payload.get("email", ""),
