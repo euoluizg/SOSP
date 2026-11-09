@@ -42,9 +42,9 @@ def test_create_appointment_and_protocol_format(auth_client):
     assert data["status"] == "scheduled"
 
 def test_cancel_appointment(auth_client):
-    # Cria agendamento para cancelamento
+    # Cria agendamento para cancelamento (pertencente ao cidadão seed citizen-001)
     appt = SchedulingService.create_appointment(
-        citizen_id="citizen-cancel-test",
+        citizen_id="citizen-001",
         service_id="servico-passe-livre",
         unit_id="unidade-centro",
         scheduled_date="2026-11-25",
