@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { ShieldCheck, ArrowLeft } from "lucide-react";
+import { ShieldCheck, ArrowLeft, GraduationCap, Lock, CheckCircle2 } from "lucide-react";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -13,13 +13,24 @@ export default function PrivacyPolicyPage() {
           Voltar para a página inicial
         </Link>
 
+        {/* Banner Acadêmico */}
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
+          <GraduationCap className="w-5 h-5 text-[#1351B4] shrink-0 mt-0.5" />
+          <div className="text-xs text-blue-900 leading-relaxed">
+            <span className="font-bold">Aviso Institucional e Acadêmico:</span> O SOSP é um projeto
+            acadêmico desenvolvido por estudantes do curso de Engenharia de Software do CESMAC para fins
+            de estudo, pesquisa e demonstração de arquiteturas de software público. Esta plataforma não
+            substitui canais oficiais de atendimento governamental.
+          </div>
+        </div>
+
         <div className="flex items-center gap-4 pb-6 border-b border-gray-100 mb-8">
           <div className="w-12 h-12 rounded-xl bg-green-50 text-green-700 flex items-center justify-center">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
             <span className="text-xs font-bold uppercase tracking-wider text-green-700">
-              Lei Geral de Proteção de Dados (Lei nº 13.709/2018)
+              Lei Geral de Proteção de Dados (Lei nº 13.709/2018 — LGPD)
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-0.5">
               Política de Privacidade e Proteção de Dados
@@ -29,37 +40,64 @@ export default function PrivacyPolicyPage() {
 
         <div className="prose prose-sm max-w-none text-gray-700 space-y-5 text-sm leading-relaxed">
           <p>
-            O <strong>SOSP (Sistema de Orientação para Serviços Públicos)</strong>, mantido pelo Governo do Estado de Alagoas,
-            trata os dados pessoais de cidadãos e servidores em estrita observância à Lei Geral de Proteção de Dados Pessoais (LGPD).
+            O <strong>SOSP (Sistema de Orientação para Serviços Públicos)</strong> trata dados pessoais em
+            estrita conformidade com os princípios e bases legais da Lei Geral de Proteção de Dados Pessoais
+            (Lei Federal nº 13.709/2018).
           </p>
 
-          <h2 className="text-lg font-bold text-gray-900 pt-2">1. Dados Coletados e Finalidade</h2>
+          <h2 className="text-lg font-bold text-gray-900 pt-2">1. Dados Coletados e Princípio da Minimização</h2>
           <p>
-            Coletamos apenas as informações estritamente necessárias para a prestação dos serviços públicos solicitados,
-            incluindo nome completo, CPF, data de nascimento, filiação, telefone, e-mail e endereço residencial. Tais dados
-            são utilizados unicamente para:
+            Coletamos exclusivamente as informações estritamente necessárias para a prestação do serviço
+            de orientação e simulação de agendamento presencial (Art. 6º, III da LGPD), compreendendo:
           </p>
           <ul className="list-disc pl-5 space-y-1">
-            <li>Identificação segura do cidadão junto aos órgãos oficiais (ex.: DETRAN, SSP, SEFAZ);</li>
-            <li>Geração de protocolo rastreável de agendamento (AAAAMMDD-XXXX);</li>
-            <li>Envio de comprovantes e notificações transacionais por e-mail.</li>
+            <li><strong>Identificação do Cidadão:</strong> Nome completo, CPF, data de nascimento e filiação materna;</li>
+            <li><strong>Acessibilidade (PCD):</strong> Condição de Pessoa com Deficiência para viabilizar atendimento prioritário e adequado;</li>
+            <li><strong>Contato:</strong> E-mail e telefone celular para emissão de comprovantes e protocolos transacionais;</li>
+            <li><strong>Localização:</strong> CEP, logradouro e município para direcionamento às unidades de atendimento competentes.</li>
           </ul>
 
-          <h2 className="text-lg font-bold text-gray-900 pt-2">2. Segurança e Criptografia</h2>
+          <h2 className="text-lg font-bold text-gray-900 pt-2">2. Finalidade e Bases Legais</h2>
           <p>
-            As senhas de acesso são armazenadas utilizando função de derivação de chave de alta resistência
-            (<strong>Argon2id com salt aleatório</strong>), impossibilitando sua recuperação em texto simples.
-            Todas as comunicações entre seu navegador e nossos servidores são protegidas por criptografia TLS 1.3.
+            O tratamento de dados fundamenta-se nas seguintes hipóteses legais previstas na LGPD:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong>Execução de Políticas Públicas e Simulação Didática (Art. 7º, III):</strong> Orientação ao cidadão sobre etapas, documentos e agendamento de serviços essenciais;</li>
+            <li><strong>Proteção à Saúde e Acessibilidade (Art. 11, II):</strong> Dados sensíveis relacionados a deficiências utilizados estritamente para adequação física do atendimento presencial.</li>
+          </ul>
+
+          <h2 className="text-lg font-bold text-gray-900 pt-2">3. Segurança, Criptografia e Armazenamento</h2>
+          <p>
+            Adotamos medidas técnicas e organizacionais de segurança da informação compatíveis com os mais rigorosos padrões da indústria:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong>Senhas Criptografadas:</strong> Armazenadas exclusivamente sob a função criptográfica de derivação de chave <strong>Argon2id com salt aleatório</strong>, impossibilitando sua leitura em texto claro;</li>
+            <li><strong>Tráfego Seguro:</strong> Todas as comunicações entre o navegador e as APIs utilizam criptografia TLS 1.3 com certificados válidos;</li>
+            <li><strong>Trilha de Auditoria Imutável:</strong> Operações críticas geram registros de auditoria em tabela protegida (auditEvent), com registro de data, hora e IP do solicitante.</li>
+          </ul>
+
+          <h2 className="text-lg font-bold text-gray-900 pt-2">4. Exclusão Lógica e Retenção de Dados (Regra RN-40)</h2>
+          <p>
+            Para resguardar a rastreabilidade e a integridade de registros públicos e históricos de auditoria,
+            registros de agendamento e cadastros não sofrem exclusão física imediata no banco de dados. Qualquer
+            solicitação de desativação opera por exclusão lógica (<code>isActive = false</code>, <code>deletedAt = NOW()</code>),
+            sendo os dados anonimizados conforme preconiza o Art. 16 da LGPD.
           </p>
 
-          <h2 className="text-lg font-bold text-gray-900 pt-2">3. Direitos do Titular de Dados</h2>
+          <h2 className="text-lg font-bold text-gray-900 pt-2">5. Direitos do Titular de Dados (Art. 18 da LGPD)</h2>
           <p>
-            Você pode solicitar a qualquer momento a confirmação da existência de tratamento, o acesso aos seus dados
-            ou a correção de dados incompletos ou inexatos através da área do cidadão ou da Ouvidoria Estadual.
+            O titular dos dados possui o direito inalienável de solicitar, a qualquer momento:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>Confirmação da existência de tratamento e acesso aos dados;</li>
+            <li>Correção de dados incompletos, inexatos ou desatualizados;</li>
+            <li>Informação sobre as entidades públicas e privadas com as quais o projeto interage.</li>
+          </ul>
+          <p className="pt-2 text-xs text-gray-500">
+            Nenhum dado cadastrado no SOSP é comercializado, cedido ou compartilhado com terceiros para fins publicitários.
           </p>
         </div>
       </div>
     </div>
   );
 }
-

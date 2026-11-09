@@ -39,6 +39,7 @@ export default function RegisterPage() {
     cpf: "",
     birthDate: "",
     gender: "",
+    genderDescription: "",
     motherName: "",
     isPcd: false,
     disabilityType: "",
@@ -228,6 +229,14 @@ export default function RegisterPage() {
 
   const passStrength = validatePasswordStrength(formData.password);
 
+  const passwordCriteria = [
+    { label: "Mínimo de 8 caracteres", met: formData.password.length >= 8 },
+    { label: "Pelo menos uma letra maiúscula (A-Z)", met: /[A-Z]/.test(formData.password) },
+    { label: "Pelo menos uma letra minúscula (a-z)", met: /[a-z]/.test(formData.password) },
+    { label: "Pelo menos um número (0-9)", met: /\d/.test(formData.password) },
+    { label: "Pelo menos um caractere especial (!@#$%...)", met: /[^A-Za-z0-9]/.test(formData.password) },
+  ];
+
   if (submitSuccess) {
     return (
       <div className="min-h-[calc(100vh-280px)] flex items-center justify-center py-12 px-4 bg-gray-50">
@@ -353,6 +362,20 @@ export default function RegisterPage() {
                     { value: "N", label: "Prefiro não informar" },
                   ]}
                 />
+                {formData.gender === "O" && (
+                  <div className="mt-3 animate-fadeIn" aria-live="polite">
+                    <Input
+                      label="Qual? (informe como você se identifica)"
+                      id="genderDescription"
+                      name="genderDescription"
+                      placeholder="Informe sua identidade de gênero"
+                      value={formData.genderDescription}
+                      onChange={(e) => handleChange("genderDescription", e.target.value)}
+                      error={errors.genderDescription}
+                      helperText="Opcional. Campo destinado à inclusão e respeito à sua identidade."
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -634,32 +657,66 @@ export default function RegisterPage() {
                   <p className="mt-1 text-xs text-red-600">{errors.password}</p>
                 )}
 
-                {/* Barra de força da senha */}
+                {/* Barra de força da senha com badge textual */}
                 {formData.password && (
-                  <div className="mt-3">
-                    <div className="flex gap-1 h-1.5 mb-1">
+                  <div className="mt-3" aria-live="polite">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-700">Força da senha:</span>
+                      <span
+                        className={`text-xs font-bold px-2 py-0.5 rounded ${
+                          passStrength.score <= 1
+                            ? "bg-red-100 text-red-700"
+                            : passStrength.score === 2
+                            ? "bg-amber-100 text-amber-700"
+                            : passStrength.score === 3
+                            ? "bg-blue-100 text-[#1351B4]"
+                            : "bg-green-100 text-green-700"
+                        }`}
+                      >
+                        {passStrength.score <= 1
+                          ? "Fraca"
+                          : passStrength.score === 2
+                          ? "Razoável"
+                          : passStrength.score === 3
+                          ? "Boa"
+                          : "Forte"}
+                      </span>
+                    </div>
+                    <div className="flex gap-1 h-2 mb-2">
                       {[1, 2, 3, 4].map((step) => (
                         <div
                           key={step}
-                          className={`flex-1 rounded-full ${
+                          className={`flex-1 rounded-full transition-all duration-300 ${
                             passStrength.score >= step
-                              ? passStrength.score <= 2
+                              ? passStrength.score <= 1
                                 ? "bg-red-500"
-                                : passStrength.score === 3
+                                : passStrength.score === 2
                                 ? "bg-amber-500"
+                                : passStrength.score === 3
+                                ? "bg-blue-500"
                                 : "bg-green-500"
                               : "bg-gray-200"
                           }`}
                         />
                       ))}
                     </div>
-                    <span className="text-xs text-gray-500">
-                      {passStrength.score <= 2
-                        ? "Senha fraca"
-                        : passStrength.score === 3
-                        ? "Senha média"
-                        : "Senha forte e segura"}
-                    </span>
+
+                    {/* Checklist dinâmico dos 5 critérios */}
+                    <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-1.5 text-xs">
+                      <p className="font-semibold text-gray-700 mb-1">Critérios de segurança:</p>
+                      {passwordCriteria.map((c, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          {c.met ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                          ) : (
+                            <div className="w-3.5 h-3.5 rounded-full border border-gray-300 flex-shrink-0" />
+                          )}
+                          <span className={c.met ? "text-green-700 font-medium" : "text-gray-500"}>
+                            {c.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -694,6 +751,19 @@ export default function RegisterPage() {
                     )}
                   </button>
                 </div>
+                {formData.confirmPassword && (
+                  <div className="mt-2 text-xs flex items-center gap-1.5" aria-live="polite">
+                    {formData.password === formData.confirmPassword ? (
+                      <span className="text-green-600 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> As senhas conferem
+                      </span>
+                    ) : (
+                      <span className="text-amber-600 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5" /> As senhas ainda não coincidem
+                      </span>
+                    )}
+                  </div>
+                )}
                 {errors.confirmPassword && (
                   <p className="mt-1 text-xs text-red-600">{errors.confirmPassword}</p>
                 )}
@@ -711,13 +781,13 @@ export default function RegisterPage() {
                 />
                 <span className="text-sm text-gray-700 leading-snug">
                   Li e concordo com os{" "}
-                  <a href="#" className="text-[#1351B4] font-semibold underline">
+                  <Link href="/termos" target="_blank" className="text-[#1351B4] font-semibold underline hover:text-[#0F2942]">
                     Termos de Uso
-                  </a>{" "}
+                  </Link>{" "}
                   e a{" "}
-                  <a href="#" className="text-[#1351B4] font-semibold underline">
+                  <Link href="/privacidade" target="_blank" className="text-[#1351B4] font-semibold underline hover:text-[#0F2942]">
                     Política de Privacidade
-                  </a>{" "}
+                  </Link>{" "}
                   do SOSP, em conformidade com a Lei Geral de Proteção de Dados (LGPD).
                 </span>
               </label>

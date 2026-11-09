@@ -19,7 +19,6 @@ function LoginContent() {
   const safeRedirect = sanitizeRedirectUrl(redirectParam);
 
   // Estados do formulário
-  const [profile, setProfile] = useState<"citizen" | "server">("citizen");
   const [cpf, setCpf] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -73,8 +72,14 @@ function LoginContent() {
       }
       if (safeRedirect) {
         router.push(safeRedirect);
-      } else if (profile === "server") {
+      } else if (res.citizen?.role === "server") {
         router.push("/servidor/painel");
+      } else if (
+        res.citizen?.role === "gestor" ||
+        res.citizen?.role === "admin" ||
+        res.citizen?.role === "superadmin"
+      ) {
+        router.push("/admin/orgaos");
       } else {
         router.push("/cidadao/meus-agendamentos");
       }
@@ -118,34 +123,8 @@ function LoginContent() {
           Entrar no SOSP
         </h1>
         <p className="mt-2 text-center text-sm text-gray-600">
-          Sistema de Orientação para Serviços Públicos
+          Acesse seus agendamentos, orientações e serviços públicos
         </p>
-
-        {/* Abas de Perfil (Cidadão / Servidor) */}
-        <div className="mt-6 flex bg-gray-200 p-1 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setProfile("citizen")}
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-              profile === "citizen"
-                ? "bg-white text-[#1351B4] shadow-sm"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Sou Cidadão
-          </button>
-          <button
-            type="button"
-            onClick={() => setProfile("server")}
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-              profile === "server"
-                ? "bg-white text-[#1351B4] shadow-sm"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            Sou Servidor / Gestor
-          </button>
-        </div>
       </div>
 
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
@@ -289,7 +268,7 @@ function LoginContent() {
           </form>
 
           {/* Links de Rodapé */}
-          <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+          <div className="mt-6 pt-6 border-t border-gray-100 text-center space-y-3">
             <p className="text-sm text-gray-600">
               Ainda não tem conta no SOSP?{" "}
               <Link
@@ -299,6 +278,18 @@ function LoginContent() {
                 Cadastre-se gratuitamente
               </Link>
             </p>
+            <div className="pt-2 border-t border-gray-50">
+              <p className="text-xs text-gray-500">
+                É servidor público ou gestor institucional?{" "}
+                <Link
+                  href="/login/institucional"
+                  className="font-semibold text-[#1351B4] hover:underline inline-flex items-center gap-1"
+                >
+                  Acesse o portal institucional
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </p>
+            </div>
           </div>
         </div>
       </div>

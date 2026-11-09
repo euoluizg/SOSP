@@ -61,5 +61,21 @@ describe("ApiClient Services & Mocks (Contratos, RN-05, RN-18, RN-20)", () => {
     const cancelledAppt = updated.find((a) => a.id === targetId);
     expect(cancelledAppt?.status).toBe("cancelled");
   });
+
+  it("deve iniciar sem agendamentos fakes preexistentes para cidadão sem agendamentos", async () => {
+    const list = await ApiClient.getCitizenAppointments("citizen-fresh-zero");
+    expect(list).toEqual([]);
+  });
+
+  it("deve atualizar dados do órgão via updateAgency", async () => {
+    const updated = await ApiClient.updateAgency("agency-detran", {
+      name: "Departamento Estadual de Trânsito Atualizado",
+      acronym: "DETRAN-AL",
+      sphere: "state",
+      description: "Nova descrição atualizada",
+    });
+    expect(updated.name).toBe("Departamento Estadual de Trânsito Atualizado");
+    expect(updated.acronym).toBe("DETRAN-AL");
+  });
 });
 

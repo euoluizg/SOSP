@@ -4,43 +4,8 @@ import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
 
-// Mock em memória para agendamentos do cidadão
-let MOCK_APPOINTMENTS: Appointment[] = [
-  {
-    id: "appt-001",
-    protocolNumber: "20261105-1042",
-    citizenId: "citizen-001",
-    citizenName: "Cidadão de Testes",
-    citizenCpfMasked: "***.456.789-**",
-    serviceId: "servico-emitir-rg",
-    serviceName: "Emitir Carteira de Identidade Nacional (CIN)",
-    agencyName: "Secretaria de Estado da Segurança Pública",
-    unitId: "unidade-centro",
-    unitName: "Central Já! Centro",
-    unitAddress: "Rua do Comércio, 123 - Centro, Maceió - AL",
-    scheduledDate: "2026-11-10",
-    scheduledTime: "09:30",
-    status: "scheduled",
-    createdAt: "2026-11-05T10:00:00Z",
-  },
-  {
-    id: "appt-002",
-    protocolNumber: "20261015-8831",
-    citizenId: "citizen-001",
-    citizenName: "Cidadão de Testes",
-    citizenCpfMasked: "***.456.789-**",
-    serviceId: "servico-renovar-cnh",
-    serviceName: "Renovação da Carteira Nacional de Habilitação (CNH)",
-    agencyName: "Departamento Estadual de Trânsito (DETRAN-AL)",
-    unitId: "unidade-farol",
-    unitName: "Central Já! Shopping Farol",
-    unitAddress: "Av. Fernandes Lima, 500 - Farol, Maceió - AL",
-    scheduledDate: "2026-10-18",
-    scheduledTime: "14:00",
-    status: "completed",
-    createdAt: "2026-10-15T09:12:00Z",
-  },
-];
+// Mock em memória para agendamentos do cidadão — Inicia estritamente vazio (Seção 8: Zero agendamentos fictícios)
+let MOCK_APPOINTMENTS: Appointment[] = [];
 
 export class ApiClient {
   private static async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -157,6 +122,27 @@ export class ApiClient {
     return this.request("/agencies");
   }
 
+  static async updateAgency(id: string, data: Partial<Agency>): Promise<Agency> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 150));
+      const idx = MOCK_AGENCIES.findIndex((a) => a.id === id);
+      if (idx === -1) {
+        throw {
+          type: "about:blank",
+          title: "Órgão não encontrado",
+          status: 404,
+          detail: `Órgão com ID '${id}' não encontrado.`,
+        } as ProblemDetails;
+      }
+      MOCK_AGENCIES[idx] = { ...MOCK_AGENCIES[idx], ...data };
+      return MOCK_AGENCIES[idx];
+    }
+    return this.request(`/agencies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   static async getUnits(agencyId?: string): Promise<Unit[]> {
     if (USE_MOCK) {
       if (agencyId) return MOCK_UNITS.filter((u) => u.agencyId === agencyId);
@@ -241,10 +227,11 @@ export class ApiClient {
   }
 
   /* --- Agendamentos do Cidadão --- */
-  static async getCitizenAppointments(citizenId: string): Promise<Appointment[]> {
+  static async getCitizenAppointments(citizenId?: string): Promise<Appointment[]> {
     if (USE_MOCK) {
       await new Promise((r) => setTimeout(r, 100));
-      return [...MOCK_APPOINTMENTS];
+      if (!citizenId) return [...MOCK_APPOINTMENTS];
+      return MOCK_APPOINTMENTS.filter((a) => a.citizenId === citizenId);
     }
     return this.request(`/citizens/${citizenId}/appointments`);
   }
@@ -455,6 +442,7 @@ export class ApiClient {
 export const getServices = ApiClient.getServices.bind(ApiClient);
 export const getServiceById = ApiClient.getServiceById.bind(ApiClient);
 export const getAgencies = ApiClient.getAgencies.bind(ApiClient);
+export const updateAgency = ApiClient.updateAgency.bind(ApiClient);
 export const getUnits = ApiClient.getUnits.bind(ApiClient);
 export const getAppointmentSlots = ApiClient.getSlots.bind(ApiClient);
 export const createAppointment = ApiClient.createAppointment.bind(ApiClient);
