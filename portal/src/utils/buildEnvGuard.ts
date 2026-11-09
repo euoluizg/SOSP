@@ -23,6 +23,18 @@ export function validateApiUrlForBuild(apiUrl: string | undefined): BuildEnvVali
 
   const trimmed = apiUrl.trim();
 
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      errors.push(`NEXT_PUBLIC_API_URL ('${trimmed}') deve utilizar protocolo http:// ou https://.`);
+    }
+    if (!parsed.hostname || parsed.hostname.trim() === "") {
+      errors.push(`NEXT_PUBLIC_API_URL ('${trimmed}') deve possuir um hostname válido.`);
+    }
+  } catch {
+    errors.push(`NEXT_PUBLIC_API_URL ('${trimmed}') não é uma URL válida.`);
+  }
+
   if (!trimmed.includes("/api/v1")) {
     errors.push(`NEXT_PUBLIC_API_URL ('${trimmed}') deve conter obrigatoriamente '/api/v1'.`);
   }
@@ -47,3 +59,4 @@ export function assertValidBuildEnv(apiUrl: string | undefined = process.env.NEX
     );
   }
 }
+

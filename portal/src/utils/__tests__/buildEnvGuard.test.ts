@@ -44,6 +44,18 @@ describe("Build Environment Guard (validateApiUrlForBuild)", () => {
     expect(result.errors.some((e) => e.includes("não pode conter 'localhost' ou '127.0.0.1'"))).toBe(true);
   });
 
+  it("deve rejeitar quando a URL for malformada ou sem protocolo válido", () => {
+    const result = validateApiUrlForBuild("not-a-url/api/v1");
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("não é uma URL válida"))).toBe(true);
+  });
+
+  it("deve rejeitar quando a URL utilizar protocolo diferente de http/https", () => {
+    const result = validateApiUrlForBuild("ftp://api.sosp.gov.br/api/v1");
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("deve utilizar protocolo http:// ou https://"))).toBe(true);
+  });
+
   it("assertValidBuildEnv deve lançar erro explicativo para URL inválida", () => {
     expect(() => assertValidBuildEnv("http://localhost:8000")).toThrow(
       /\[SOSP BUILD GUARD\] Falha de validação/
@@ -54,3 +66,4 @@ describe("Build Environment Guard (validateApiUrlForBuild)", () => {
     expect(() => assertValidBuildEnv("https://sosp-backend-staging.onrender.com/api/v1")).not.toThrow();
   });
 });
+
