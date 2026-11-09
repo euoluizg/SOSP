@@ -36,8 +36,7 @@ else:
     CORS_ALLOWED_ORIGINS = [
         "https://sosp.al.gov.br",
         "https://portal.sosp.al.gov.br",
-        "https://sosp-portal.workers.dev",
-        "https://sosp-portal-staging.workers.dev",
+        "https://portal.sosp.workers.dev",
     ]
 
 raw_csrf = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
@@ -47,8 +46,7 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         "https://sosp.al.gov.br",
         "https://portal.sosp.al.gov.br",
-        "https://sosp-portal.workers.dev",
-        "https://sosp-portal-staging.workers.dev",
+        "https://portal.sosp.workers.dev",
     ]
 
 # Logging Estruturado para Produção

@@ -13,7 +13,7 @@
 ```mermaid
 flowchart LR
     Citizen["Cidadão / Servidor\n(Navegador HTTPS)"]
-    CF["Cloudflare Anycast CDN & Workers\n(OpenNext: portal/.open-next/worker.js)\nsosp-portal.workers.dev"]
+    CF["Cloudflare Anycast CDN & Workers\n(OpenNext: portal/.open-next/worker.js)\nportal.sosp.workers.dev"]
     Render["Render Web Service\n(backend/ via Gunicorn)\nsosp-backend-staging.onrender.com"]
     Supa["Supabase Managed PostgreSQL 17.11\n(aws-1-sa-east-1.pooler.supabase.com:5432)\nsosp_runtime_app (RLS + HMAC)"]
 
@@ -44,8 +44,8 @@ flowchart LR
 | `DJANGO_SETTINGS_MODULE` | `config.settings.production` | Não | Módulo de configurações seguras |
 | `DEBUG` | `false` | Não | Desativa depuração em produção |
 | `ALLOWED_HOSTS` | `sosp-backend-staging.onrender.com,localhost,127.0.0.1` | Não | Hosts permitidos |
-| `CORS_ALLOWED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev` | Não | Origens dos Cloudflare Workers de staging (produção não é permitida aqui) |
-| `CSRF_TRUSTED_ORIGINS` | `https://sosp-portal.workers.dev,https://sosp-portal-staging.workers.dev` | Não | Origens confiáveis para CSRF em staging (produção não é permitida aqui) |
+| `CORS_ALLOWED_ORIGINS` | `https://portal.sosp.workers.dev` | Não | Origem do Cloudflare Worker de staging (produção não é permitida aqui) |
+| `CSRF_TRUSTED_ORIGINS` | `https://portal.sosp.workers.dev` | Não | Origem confiável para CSRF em staging (produção não é permitida aqui) |
 | `REPOSITORY_BACKEND` | `orm` | Não | Persistência real PostgreSQL via Django ORM |
 | `DB_ENGINE` | `postgresql` | Não | Engine de banco de dados |
 | `DB_HOST` | `aws-1-sa-east-1.pooler.supabase.com` | Não | Pooler Session do Supabase |
@@ -88,7 +88,7 @@ A arquitetura do SOSP utiliza **Cloudflare Workers** acoplado ao adaptador ofici
   2. Clique em **Create application > Workers > Connect to Git** (Workers Builds).
   3. Selecione o repositório GitHub e a branch `develop`.
   4. Configure os parâmetros de build:
-     - **Project Name:** `sosp-portal`
+     - **Project Name:** `portal`
      - **Root directory:** `portal`
      - **Build command:** `npm run build:cloudflare` (executa `opennextjs-cloudflare build`)
      - **Deploy command:** `npx wrangler deploy` (ou automático via Workers Builds)
@@ -150,7 +150,7 @@ A arquitetura do SOSP utiliza **Cloudflare Workers** acoplado ao adaptador ofici
    ```
 
 3. **Acesso ao Worker Cloudflare:**
-   - Acessar `https://sosp-portal.workers.dev` (ou subdomínio atribuído pela Cloudflare) no navegador.
+   - Acessar `https://portal.sosp.workers.dev` no navegador.
    - Inspecionar a aba Rede do DevTools:
      - Resposta do documento principal servida via Cloudflare Edge (`cf-ray` presente nos headers).
      - Chamadas para `/api/v1/...` direcionadas com sucesso ao Render sem erros de CORS (`access-control-allow-origin` presente).
@@ -165,6 +165,6 @@ A arquitetura do SOSP utiliza **Cloudflare Workers** acoplado ao adaptador ofici
 3. Clique em **Rollback to this deploy**. O tráfego reverte imediatamente.
 
 ### 6.2 Rollback na Cloudflare Workers
-1. Acesse o painel Cloudflare > **Compute (Workers) > sosp-portal > Deployments**.
+1. Acesse o painel Cloudflare > **Compute (Workers) > portal > Deployments**.
 2. Identifique a versão estável anterior na lista de versões.
 3. Clique em **Rollback to this version**. A propagação na rede Anycast é instantânea (milissegundos).
