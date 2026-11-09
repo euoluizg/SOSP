@@ -5,6 +5,7 @@ from django.db import connection
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 
 class HealthCheckView(APIView):
     """
@@ -13,7 +14,7 @@ class HealthCheckView(APIView):
     - Autenticado / Interno / Debug: Retorna diagnóstico detalhado (latência, engine, repositórios).
     """
     authentication_classes = []
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
         db_status = "operational"

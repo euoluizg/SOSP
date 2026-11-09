@@ -1,15 +1,20 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .services import FeedbackService
 from common.exceptions import ProblemDetailsException
 
 class FaqListView(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request):
         faqs = FeedbackService.list_faqs()
         return Response(faqs, status=status.HTTP_200_OK)
 
 class QuestionCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
         citizen_name = request.data.get("citizenName") or request.data.get("name")
         email = request.data.get("email")
@@ -33,6 +38,8 @@ class QuestionCreateView(APIView):
         return Response(question, status=status.HTTP_201_CREATED)
 
 class ReviewSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, protocol_number):
         rating = request.data.get("rating", 5)
         comment = request.data.get("comment")

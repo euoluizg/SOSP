@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .serializers import CreateAppointmentSerializer, CancelAppointmentSerializer
 from .services import SchedulingService
 from .repositories import scheduling_repository
@@ -8,6 +9,8 @@ from common.exceptions import ProblemDetailsException
 
 class UnitSlotsView(APIView):
     """Retorna slots de 30 minutos disponíveis para uma unidade e data (RN-18)."""
+    permission_classes = [AllowAny]
+
     def get(self, request, unit_id):
         date_str = request.query_params.get("date")
         if not date_str:
@@ -16,6 +19,8 @@ class UnitSlotsView(APIView):
         return Response(slots, status=status.HTTP_200_OK)
 
 class AppointmentCreateListView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
         idempotency_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
         if not idempotency_key:
@@ -48,11 +53,9 @@ class AppointmentCreateListView(APIView):
         )
         return Response(appt, status=status.HTTP_201_CREATED)
 
-    def get(self, request):
-        appts = scheduling_repository.list_all()
-        return Response(appts, status=status.HTTP_200_OK)
-
 class AppointmentDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, appointment_id):
         appt = scheduling_repository.get_by_id(appointment_id)
         if not appt:
@@ -60,6 +63,8 @@ class AppointmentDetailView(APIView):
         return Response(appt, status=status.HTTP_200_OK)
 
 class AppointmentCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, appointment_id):
         serializer = CancelAppointmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -71,6 +76,8 @@ class AppointmentCancelView(APIView):
         return self.post(request, appointment_id)
 
 class AppointmentByProtocolView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, protocol_number):
         appt = scheduling_repository.get_by_protocol(protocol_number)
         if not appt:
@@ -78,16 +85,22 @@ class AppointmentByProtocolView(APIView):
         return Response(appt, status=status.HTTP_200_OK)
 
 class CitizenAppointmentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, citizen_id):
         appts = scheduling_repository.list_by_citizen(citizen_id)
         return Response(appts, status=status.HTTP_200_OK)
 
 class ProtocolTimelineView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, protocol_number):
         timeline = SchedulingService.get_protocol_timeline(protocol_number)
         return Response(timeline, status=status.HTTP_200_OK)
 
 class ProtocolDocumentsUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, protocol_number):
         appt = scheduling_repository.get_by_protocol(protocol_number)
         if not appt:

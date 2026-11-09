@@ -83,7 +83,10 @@ def problem_details_exception_handler(exc: Exception, context: Dict[str, Any]) -
             payload["errors"] = errors
 
         response.data = payload
-        response["Content-Type"] = "application/problem+json"
+        # `content_type` (e não o header) precisa ser definido no Response: o DRF
+        # sobrescreve o header `Content-Type` a partir de `response.content_type`
+        # durante a renderização, descartando qualquer valor setado manualmente.
+        response.content_type = "application/problem+json"
         return response
 
     return None
