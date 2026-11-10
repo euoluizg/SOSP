@@ -599,12 +599,19 @@ CREATE POLICY p_lgpd_update ON public.auditDataSubjectRequest
 -- ------------------------------------------------------------------------------
 -- 23. Tabelas Django (Somente Leitura)
 -- ------------------------------------------------------------------------------
-DROP POLICY IF EXISTS p_django_migrations_select ON public.django_migrations;
-CREATE POLICY p_django_migrations_select ON public.django_migrations
-    FOR SELECT TO sosp_runtime_role USING (true);
-
-DROP POLICY IF EXISTS p_django_content_type_select ON public.django_content_type;
-CREATE POLICY p_django_content_type_select ON public.django_content_type
-    FOR SELECT TO sosp_runtime_role USING (true);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'django_migrations') THEN
+        DROP POLICY IF EXISTS p_django_migrations_select ON public.django_migrations;
+        CREATE POLICY p_django_migrations_select ON public.django_migrations
+            FOR SELECT TO sosp_runtime_role USING (true);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'django_content_type') THEN
+        DROP POLICY IF EXISTS p_django_content_type_select ON public.django_content_type;
+        CREATE POLICY p_django_content_type_select ON public.django_content_type
+            FOR SELECT TO sosp_runtime_role USING (true);
+    END IF;
+END;
+$$;
 
 COMMIT;

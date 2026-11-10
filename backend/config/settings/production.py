@@ -3,6 +3,10 @@ from .base import *
 
 DEBUG = False
 
+# Toda sessão de produção deve existir em accountsSession; tokens órfãos são rejeitados.
+# Em caso de indisponibilidade do banco, a autenticação falha de modo fechado.
+REQUIRE_REGISTERED_SESSION = True
+
 # Hosts permitidos em produção
 raw_allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
 if raw_allowed_hosts:

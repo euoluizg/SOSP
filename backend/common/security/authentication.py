@@ -230,12 +230,22 @@ class SospTokenAuthentication(BaseAuthentication):
             is_active=True,
         )
 
-        # 1. Estabelece o contexto de segurança autenticado na conexão PostgreSQL ativa (ADR-003, Etapa 4D.2)
+        # 1. Estabelece contexto RLS com falha segura no backend persistente.
+        from common.security.db_context import set_db_security_context, clear_db_security_context
+        orm_mode = getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm"
         try:
-            from common.security.db_context import set_db_security_context, clear_db_security_context
-            set_db_security_context(user=user)
+            context_ready = set_db_security_context(user=user)
+            if orm_mode and not context_ready:
+                raise AuthenticationFailed("Não foi possível validar o contexto de segurança.")
+        except AuthenticationFailed:
+            clear_db_security_context()
+            raise
         except Exception as e:
-            logger.warning("Falha ao definir contexto de banco no autenticador DRF: %s", e)
+            if orm_mode:
+                logger.error("Falha ao definir contexto RLS no autenticador: %s", e)
+                clear_db_security_context()
+                raise AuthenticationFailed("Não foi possível validar o contexto de segurança.")
+            logger.warning("Contexto de banco indisponível no modo de demonstração: %s", e)
 
         # 2. Verifica revogação de sessão no servidor (accountsSession / revogação ativa sob RLS)
         try:
@@ -247,29 +257,74 @@ class SospTokenAuthentication(BaseAuthentication):
                     clear_db_security_context()
                 except Exception:
                     pass
-                raise AuthenticationFailed("Sessão revogada no servidor. Faça login novamente.")
+                raise AuthenticationFailed("Sessão revogada ou inválida no servidor. Faça login novamente.")
         except AuthenticationFailed:
             raise
         except Exception as e:
-            logger.debug("Verificação de revogação de sessão ignorada: %s", e)
+            if getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm":
+                logger.error("Falha ao verificar revogação de sessão no banco (Fail-Closed): %s", e)
+                try:
+                    from common.security.db_context import clear_db_security_context
+                    clear_db_security_context()
+                except Exception:
+                    pass
+                raise AuthenticationFailed("Falha de segurança ao validar sessão no servidor.")
+            logger.debug("Verificação de revogação de sessão ignorada em modo não-ORM: %s", e)
 
-        # 3. Re-validação de status no banco sob o próprio contexto RLS do usuário (anti-stale claims)
+        # 3. Revalidação autoritativa a cada requisição: não confiar em claims
+        # antigas de perfil/órgão/unidade contidas em JWT ainda não expirado.
+        def canonical_role(value):
+            if value in ("servant", "server", "servidor"):
+                return "server"
+            if value in ("gestor", "manager"):
+                return "gestor"
+            if value in ("citizen", "cidadao"):
+                return "citizen"
+            return value
+
         try:
-            from apps.accounts.repositories import citizen_repository
-            citizen = citizen_repository.get_by_id(str(user_id))
-            if citizen:
-                if not citizen.get("isActive", True) or citizen.get("deletedAt"):
-                    try:
-                        from common.security.db_context import clear_db_security_context
-                        clear_db_security_context()
-                    except Exception:
-                        pass
+            if orm_mode:
+                from apps.accounts.models import Citizen, InternalUser
+
+                token_role = canonical_role(role)
+                if token_role == "citizen":
+                    current = Citizen.objects.filter(
+                        id=user_id, is_active=True, deleted_at__isnull=True
+                    ).values("id").first()
+                    if not current:
+                        raise AuthenticationFailed("Conta desativada, excluída ou inexistente.")
+                elif token_role in ("server", "gestor", "admin", "superadmin"):
+                    current = InternalUser.objects.filter(id=user_id).values(
+                        "role", "agency_id", "unit_id", "is_active", "deleted_at"
+                    ).first()
+                    if not current or not current["is_active"] or current["deleted_at"] is not None:
+                        raise AuthenticationFailed("Conta institucional desativada, excluída ou inexistente.")
+
+                    if (
+                        canonical_role(current["role"]) != token_role
+                        or str(current["agency_id"] or "") != str(agency_id or "")
+                        or str(current["unit_id"] or "") != str(unit_id or "")
+                    ):
+                        raise AuthenticationFailed(
+                            "Permissões institucionais alteradas. Faça login novamente."
+                        )
+                else:
+                    raise AuthenticationFailed("Perfil de autenticação inválido.")
+            else:
+                from apps.accounts.repositories import citizen_repository
+                subject = citizen_repository.get_by_id(str(user_id))
+                if subject and (
+                    not subject.get("isActive", True) or subject.get("deletedAt")
+                ):
                     raise AuthenticationFailed("Conta desativada ou excluída.")
-                role = citizen.get("role", role)
-                user.role = role
         except AuthenticationFailed:
+            clear_db_security_context()
             raise
         except Exception as e:
-            logger.debug("Verificação de repositório no autenticador ignorada para perfil não-cidadão: %s", e)
+            if orm_mode:
+                logger.error("Falha na revalidação autoritativa de identidade: %s", e)
+                clear_db_security_context()
+                raise AuthenticationFailed("Falha de segurança ao validar a identidade no servidor.")
+            logger.debug("Revalidação indisponível no modo de demonstração: %s", e)
 
         return (user, token)

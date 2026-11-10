@@ -32,6 +32,12 @@ BEGIN;
   END;
   $$;
   
+  -- -----------------------------------------------------------------------------
+  -- 3. SCHEMA DE SEGURANÇA E AUTENTICAÇÃO DE MENOR PRIVILÉGIO
+  -- -----------------------------------------------------------------------------
+  CREATE SCHEMA IF NOT EXISTS sosp_security;
+  REVOKE ALL ON SCHEMA sosp_security FROM PUBLIC;
+
   -- =============================================================================
   -- MÓDULO 1: ACCOUNTS
   -- =============================================================================
@@ -60,6 +66,7 @@ BEGIN;
     loginAttempts         integer NOT NULL DEFAULT 0,
     blockedUntil          timestamptz,
     genderId              uuid NOT NULL,
+    genderDescription     varchar(120),
     isPcd                 boolean NOT NULL DEFAULT false,
     disabilityDescription varchar(120),
     motherName            varchar(120) NOT NULL,
@@ -101,6 +108,7 @@ BEGIN;
     email               varchar(200) NOT NULL,
     registrationNumber  varchar(20) NOT NULL,
     agencyId            uuid,
+    unitId              uuid,
     role                varchar(20) NOT NULL,
     canManageCatalog    boolean NOT NULL DEFAULT false,
     passwordHash        varchar(255) NOT NULL,
@@ -110,15 +118,72 @@ BEGIN;
     createdAt           timestamptz NOT NULL DEFAULT now(),
     updatedAt           timestamptz NOT NULL DEFAULT now(),
     deletedAt           timestamptz,
-    CONSTRAINT chkAccountsInternalUserRole CHECK (role IN ('administrator', 'servant')),
-    CONSTRAINT chkAccountsInternalUserCpf CHECK (cpf ~ '^[0-9]{11}$'),
-    CONSTRAINT chkAccountsInternalUserRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9]{1,20}$')
+    CONSTRAINT chkAccountsInternalCpf CHECK (cpf ~ '^[0-9]{11}$'),
+    CONSTRAINT chkAccountsInternalEmail CHECK (email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+    CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant')),
+    CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$'),
+    CONSTRAINT chkAccountsInternalName CHECK (char_length(fullName) >= 3)
   );
   
   CREATE UNIQUE INDEX uqAccountsInternalUserCpf ON accountsInternalUser (cpf) WHERE deletedAt IS NULL;
   CREATE UNIQUE INDEX uqAccountsInternalUserEmail ON accountsInternalUser (lower(email)) WHERE deletedAt IS NULL;
   CREATE UNIQUE INDEX uqAccountsInternalUserRegistration ON accountsInternalUser (registrationNumber) WHERE deletedAt IS NULL;
   CREATE INDEX idxAccountsInternalUserAgency ON accountsInternalUser (agencyId);
+  CREATE INDEX idxAccountsInternalUserUnit ON accountsInternalUser (unitId);
+
+  -- Função de autenticação cirúrgica de menor privilégio para usuários internos (sosp_security)
+  CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
+  RETURNS TABLE (
+      user_id UUID,
+      full_name VARCHAR,
+      email VARCHAR,
+      registration_number VARCHAR,
+      agency_id UUID,
+      unit_id UUID,
+      role VARCHAR,
+      can_manage_catalog BOOLEAN,
+      password_hash TEXT,
+      is_active BOOLEAN
+  )
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public
+  AS $$
+  BEGIN
+      IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+          RETURN;
+      END IF;
+
+      RETURN QUERY
+      SELECT
+          u.id AS user_id,
+          u.fullName AS full_name,
+          u.email AS email,
+          u.registrationNumber AS registration_number,
+          u.agencyId AS agency_id,
+          u.unitId AS unit_id,
+          u.role AS role,
+          u.canManageCatalog AS can_manage_catalog,
+          u.passwordHash::TEXT AS password_hash,
+          u.isActive AS is_active
+      FROM public.accountsInternalUser u
+      WHERE u.cpf = p_cpf
+        AND u.isActive = true
+        AND u.deletedAt IS NULL
+      LIMIT 1;
+  END;
+  $$;
+
+  REVOKE ALL ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) FROM PUBLIC;
+  DO $$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sosp_runtime_role') THEN
+      GRANT EXECUTE ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) TO sosp_runtime_role;
+    END IF;
+  END;
+  $$;
+  COMMENT ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) IS
+  'SOSP: Autenticação de usuários internos com menor privilégio (SECURITY DEFINER) sob RLS.';
   
   CREATE TABLE accountsSession (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -130,8 +195,8 @@ BEGIN;
     expiresAt   timestamptz NOT NULL,
     revokedAt   timestamptz,
     createdAt   timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chkAccountsSessionSubjectType CHECK (subjectType IN ('citizen', 'internal')),
-    CONSTRAINT uqAccountsSessionToken UNIQUE (tokenHash)
+    CONSTRAINT uqAccountsSessionToken UNIQUE (tokenHash),
+    CONSTRAINT chkAccountsSessionSubject CHECK (subjectType IN ('citizen', 'internal'))
   );
   
   CREATE INDEX idxAccountsSessionSubject ON accountsSession (subjectType, subjectId);

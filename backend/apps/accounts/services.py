@@ -1,11 +1,16 @@
 import re
+import secrets
 import datetime
 import hashlib
+import logging
 from typing import Any, Dict, List, Tuple
+from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from common.exceptions import ProblemDetailsException
 from common.security.authentication import generate_sosp_token
 from .repositories import citizen_repository
+
+logger = logging.getLogger(__name__)
 
 def validate_cpf(cpf: str) -> bool:
     """Valida o formato e os dois dígitos verificadores do CPF."""
@@ -115,11 +120,15 @@ class AccountService:
         hashed_password = make_password(password)
 
         clean_cpf = "".join(filter(str.isdigit, cpf))
+        gender_code = data.get("gender", "").strip()
+        gender_desc = data.get("genderDescription", "").strip() if gender_code == "O" else ""
         citizen_data = {
             "fullName": data.get("fullName", "").strip(),
             "cpf": clean_cpf,
             "socialName": data.get("socialName", "").strip(),
             "birthDate": birth_date,
+            "gender": gender_code,
+            "genderDescription": gender_desc[:120],
             "motherName": data.get("motherName", "").strip(),
             "rg": data.get("rg", "").strip(),
             "rgIssuer": data.get("rgIssuer", "").strip(),
@@ -207,11 +216,25 @@ class AccountService:
 
         # Registra sessão no servidor (accountsSession / RN-28)
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        citizen_repository.create_session(
-            subject_type=citizen.get("role", "citizen"),
-            subject_id=citizen["id"],
-            token_hash=token_hash,
-        )
+        raw_role = citizen.get("role", "citizen")
+        subject_type = "citizen" if raw_role in ("citizen", "cidadao") else "internal"
+        try:
+            citizen_repository.create_session(
+                subject_type=subject_type,
+                subject_id=citizen["id"],
+                token_hash=token_hash,
+                role=raw_role,
+                agency_id=citizen.get("agencyId"),
+            )
+        except Exception as e:
+            if getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm":
+                logger.error("Falha ao registrar sessão no servidor (Fail-Closed): %s", e)
+                raise ProblemDetailsException(
+                    detail="Falha ao registrar sessão no servidor.",
+                    status_code=500,
+                    title="Erro de Persistência de Sessão",
+                )
+            logger.debug("Falha ao criar sessão em repositório não-ORM: %s", e)
 
         return {
             "token": token,
@@ -236,9 +259,18 @@ class AccountService:
             # Retorna sucesso neutro para não expor existência de usuário (OWASP)
             return {"message": "Se o CPF estiver cadastrado, um código de verificação será enviado por e-mail."}
 
-        code = "123456"  # Código simulado para ambiente de desenvolvimento/testes
+        # Gera código aleatório criptograficamente seguro de 6 dígitos
+        code = f"{secrets.randbelow(900000) + 100000}"
         citizen_repository.set_recovery_code(clean_cpf, code)
-        return {"message": "Código de verificação enviado por e-mail com sucesso.", "codeSimulated": code}
+
+        res: Dict[str, str] = {
+            "message": "Código de verificação enviado por e-mail com sucesso."
+        }
+        django_env = getattr(settings, "DJANGO_ENV", "development").lower()
+        is_test_or_dev = getattr(settings, "DEBUG", False) or getattr(settings, "TESTING", False) or django_env in ("development", "test")
+        if is_test_or_dev and django_env not in ("staging", "production"):
+            res["codeSimulated"] = code
+        return res
 
     @staticmethod
     def reset_password(cpf: str, code: str, new_password: str) -> Dict[str, str]:
@@ -262,10 +294,11 @@ class AccountService:
                 errors=[{"field": "newPassword", "message": err} for err in pwd_errors],
             )
 
-        citizen["passwordHash"] = make_password(new_password)
+        new_password_hash = make_password(new_password)
+        citizen_repository.update_password(clean_cpf, new_password_hash)
         citizen_repository.clear_recovery_code(clean_cpf)
         # Revoga todas as sessões ativas no servidor (proteção de redefinição de credencial)
-        citizen_repository.revoke_all_sessions(citizen["id"])
+        citizen_repository.revoke_all_sessions(citizen["id"], role=citizen.get("role"))
         return {"message": "Senha redefinida com sucesso."}
 
     @staticmethod

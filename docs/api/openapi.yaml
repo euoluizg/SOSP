@@ -1992,6 +1992,11 @@ components:
           type: string
         gender:
           type: string
+        genderDescription:
+          type: string
+          maxLength: 120
+          nullable: true
+          description: Descrição da identidade de gênero quando selecionada a opção 'Outro'
         isPcd:
           type: boolean
         pcdDescription:
