@@ -295,7 +295,13 @@ class AccountService:
             )
 
         new_password_hash = make_password(new_password)
-        citizen_repository.update_password(clean_cpf, new_password_hash)
+        updated = citizen_repository.update_password(clean_cpf, new_password_hash, code=code)
+        if not updated:
+            raise ProblemDetailsException(
+                detail="Código de verificação inválido ou expirado.",
+                title="Código Inválido",
+                status_code=400,
+            )
         citizen_repository.clear_recovery_code(clean_cpf)
         # Revoga todas as sessões ativas no servidor (proteção de redefinição de credencial)
         citizen_repository.revoke_all_sessions(citizen["id"], role=citizen.get("role"))

@@ -368,7 +368,11 @@ class CatalogDjangoORMRepository:
 
     def get_agency_by_id(self, agency_id: str) -> Optional[Dict[str, Any]]:
         from .models import Agency
-        a = Agency.objects.filter(id=agency_id, is_active=True, deleted_at__isnull=True).first()
+        from django.core.exceptions import ValidationError
+        try:
+            a = Agency.objects.filter(id=agency_id, is_active=True, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
         if not a:
             return None
         return {
@@ -383,7 +387,11 @@ class CatalogDjangoORMRepository:
     def update_agency(self, agency_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         from .models import Agency
         from django.utils import timezone
-        a = Agency.objects.filter(id=agency_id, deleted_at__isnull=True).first()
+        from django.core.exceptions import ValidationError
+        try:
+            a = Agency.objects.filter(id=agency_id, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
         if not a:
             return None
         if "name" in data:
@@ -435,7 +443,11 @@ class CatalogDjangoORMRepository:
 
     def get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         from .models import Unit
-        u = Unit.objects.filter(id=unit_id, is_active=True, deleted_at__isnull=True).first()
+        from django.core.exceptions import ValidationError
+        try:
+            u = Unit.objects.filter(id=unit_id, is_active=True, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
         if not u:
             return None
         return {
@@ -475,7 +487,11 @@ class CatalogDjangoORMRepository:
 
     def get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
         from .models import Service, ServiceStep, ServiceDocument
-        s = Service.objects.filter(id=service_id, deleted_at__isnull=True).first()
+        from django.core.exceptions import ValidationError
+        try:
+            s = Service.objects.filter(id=service_id, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
         if not s:
             return None
         steps = [

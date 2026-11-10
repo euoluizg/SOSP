@@ -246,10 +246,10 @@ def test_password_reset_orm_persists_to_db_and_invalidates_code():
     assert repo.verify_recovery_code(cpf, recovery_code) is True
     assert repo.verify_recovery_code(cpf, "000000") is False
 
-    # 2. Atualiza senha no ORM
+    # 2. Atualiza senha no ORM com o código validado
     new_pwd = "NewSecurePassword!2"
     new_hash = make_password(new_pwd)
-    updated = repo.update_password(cpf, new_hash)
+    updated = repo.update_password(cpf, new_hash, code=recovery_code)
     assert updated is True
 
     # 3. Invalida código de recuperação e revoga sessões ativas

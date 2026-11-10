@@ -72,7 +72,8 @@ export default function ServiceGuidePage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-[1000px] mx-auto py-10 px-4">
+      <div className="max-w-[1000px] mx-auto py-10 px-4" aria-busy="true">
+        <span className="sr-only">Carregando passo a passo e checklist de documentos...</span>
         <Skeleton className="h-6 w-48 mb-4" />
         <Skeleton className="h-10 w-2/3 mb-6" />
         <Skeleton className="h-28 w-full rounded-2xl mb-8" />

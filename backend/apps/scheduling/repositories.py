@@ -70,6 +70,10 @@ class SchedulingInMemoryRepository:
         return list(self._appointments)
 
     def save(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        for i, a in enumerate(self._appointments):
+            if a.get("id") == data.get("id") or (data.get("protocolNumber") and a.get("protocolNumber") == data.get("protocolNumber")):
+                self._appointments[i] = data
+                return data
         self._appointments.insert(0, data)
         return data
 
@@ -143,6 +147,11 @@ class SchedulingDjangoORMRepository:
 
                 slot_date = data["scheduledDate"]
                 slot_time = data["scheduledTime"]
+                if isinstance(slot_date, str):
+                    slot_date = datetime.date.fromisoformat(slot_date)
+                if isinstance(slot_time, str):
+                    parts = slot_time.split(":")
+                    slot_time = datetime.time(int(parts[0]), int(parts[1]))
 
                 # Bloqueio transacional de concorrência com select_for_update() (RN-18)
                 slot = Slot.objects.select_for_update().filter(

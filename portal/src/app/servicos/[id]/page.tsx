@@ -59,7 +59,8 @@ export default function ServiceDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-[1200px] mx-auto py-10 px-4">
+      <div className="max-w-[1200px] mx-auto py-10 px-4" aria-busy="true">
+        <span className="sr-only">Carregando ficha orientativa do serviço...</span>
         <Skeleton className="h-6 w-48 mb-4" />
         <Skeleton className="h-10 w-3/4 mb-4" />
         <Skeleton className="h-5 w-1/2 mb-8" />
