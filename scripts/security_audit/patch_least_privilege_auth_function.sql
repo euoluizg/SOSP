@@ -24,6 +24,7 @@
 BEGIN;
 
 -- 1. Criação da função SECURITY DEFINER com search_path seguro
+DROP FUNCTION IF EXISTS sosp_security.authenticate_citizen_by_cpf(VARCHAR);
 CREATE OR REPLACE FUNCTION sosp_security.authenticate_citizen_by_cpf(p_cpf VARCHAR)
 RETURNS TABLE (
     citizen_id UUID,
@@ -73,6 +74,7 @@ REVOKE ALL ON FUNCTION sosp_security.authenticate_citizen_by_cpf(VARCHAR) FROM P
 GRANT EXECUTE ON FUNCTION sosp_security.authenticate_citizen_by_cpf(VARCHAR) TO sosp_runtime_role;
 
 -- 3. Função de autenticação cirúrgica de menor privilégio para usuários internos (sosp_security)
+DROP FUNCTION IF EXISTS sosp_security.authenticate_internal_user_by_cpf(VARCHAR);
 CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
 RETURNS TABLE (
     user_id UUID,
@@ -84,7 +86,8 @@ RETURNS TABLE (
     role VARCHAR,
     can_manage_catalog BOOLEAN,
     password_hash TEXT,
-    is_active BOOLEAN
+    is_active BOOLEAN,
+    must_change_password BOOLEAN
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -106,7 +109,8 @@ BEGIN
         u.role AS role,
         u.canManageCatalog AS can_manage_catalog,
         u.passwordHash::TEXT AS password_hash,
-        u.isActive AS is_active
+        u.isActive AS is_active,
+        u.mustChangePassword AS must_change_password
     FROM public.accountsInternalUser u
     WHERE u.cpf = p_cpf
       AND u.isActive = true

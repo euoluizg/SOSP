@@ -22,6 +22,18 @@ class IsCitizen(BasePermission):
         )
 
 
+class HasChangedTemporaryPassword(BasePermission):
+    """Bloqueia usuários institucionais que precisam alterar a senha temporária no primeiro acesso."""
+    message = "É obrigatório alterar a senha temporária no primeiro acesso antes de realizar operações no sistema."
+
+    def has_permission(self, request, view):
+        return not bool(
+            request.user
+            and getattr(request.user, "is_authenticated", False)
+            and getattr(request.user, "must_change_password", False)
+        )
+
+
 class IsServerUser(BasePermission):
     """Permite acesso a servidores lotados, gestores institucionais e administradores (ADR-003)."""
 
@@ -29,6 +41,7 @@ class IsServerUser(BasePermission):
         return bool(
             request.user
             and getattr(request.user, "is_authenticated", False)
+            and not getattr(request.user, "must_change_password", False)
             and getattr(request.user, "role", None)
             in (
                 "server",
@@ -51,6 +64,7 @@ class IsManagerUser(BasePermission):
         return bool(
             request.user
             and getattr(request.user, "is_authenticated", False)
+            and not getattr(request.user, "must_change_password", False)
             and getattr(request.user, "role", None)
             in (
                 "gestor",
@@ -70,6 +84,7 @@ class IsAdminUser(BasePermission):
         return bool(
             request.user
             and getattr(request.user, "is_authenticated", False)
+            and not getattr(request.user, "must_change_password", False)
             and getattr(request.user, "role", None)
             in (
                 "admin",
@@ -90,6 +105,7 @@ class IsInstitutionalUser(BasePermission):
         return bool(
             request.user
             and getattr(request.user, "is_authenticated", False)
+            and not getattr(request.user, "must_change_password", False)
             and getattr(request.user, "role", None)
             in (
                 "server",

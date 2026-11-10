@@ -64,6 +64,7 @@ class SospUser:
         email: str = "",
         is_active: bool = True,
         unit_id: str | uuid.UUID | None = None,
+        must_change_password: bool = False,
     ):
         self.id = uuid.UUID(str(user_id)) if isinstance(user_id, str) and len(user_id) == 36 else user_id
         self.role = role
@@ -73,6 +74,7 @@ class SospUser:
         self.full_name = full_name
         self.email = email
         self.is_active = is_active
+        self.must_change_password = bool(must_change_password)
         self.is_authenticated = True
         self.is_anonymous = False
 
@@ -123,6 +125,7 @@ def generate_sosp_token(
     email: str = "",
     expires_in_seconds: int = 1800,  # 30 minutos (RN-28)
     unit_id: str | uuid.UUID | None = None,
+    must_change_password: bool = False,
 ) -> str:
     """
     Gera um token criptográfico assinado HMAC-SHA256 (compatível com padrão JWT HS256).
@@ -138,6 +141,7 @@ def generate_sosp_token(
         "cpf": cpf,
         "name": full_name,
         "email": email,
+        "must_change_password": bool(must_change_password),
         "iat": now,
         "exp": now + expires_in_seconds,
         "jti": uuid.uuid4().hex,
@@ -228,6 +232,7 @@ class SospTokenAuthentication(BaseAuthentication):
             full_name=payload.get("name", ""),
             email=payload.get("email", ""),
             is_active=True,
+            must_change_password=payload.get("must_change_password", False),
         )
 
         # 1. Estabelece contexto RLS com falha segura no backend persistente.
@@ -295,10 +300,12 @@ class SospTokenAuthentication(BaseAuthentication):
                         raise AuthenticationFailed("Conta desativada, excluída ou inexistente.")
                 elif token_role in ("server", "gestor", "admin", "superadmin"):
                     current = InternalUser.objects.filter(id=user_id).values(
-                        "role", "agency_id", "unit_id", "is_active", "deleted_at"
+                        "role", "agency_id", "unit_id", "is_active", "deleted_at", "must_change_password"
                     ).first()
                     if not current or not current["is_active"] or current["deleted_at"] is not None:
                         raise AuthenticationFailed("Conta institucional desativada, excluída ou inexistente.")
+
+                    user.must_change_password = bool(current.get("must_change_password", False))
 
                     if (
                         canonical_role(current["role"]) != token_role

@@ -262,9 +262,11 @@ class TestSchemaConstraintsAlignment:
         for reg in demo_registrations:
             assert reg_regex.match(reg) is not None, f"Matrícula '{reg}' deve ser aceita pelo regex da constraint."
 
-        valid_roles = {"superadmin", "admin", "gestor", "manager", "servant"}
+        valid_roles = {"superadmin", "admin", "gestor", "server", "manager", "servant", "administrator"}
         for r in demo_roles:
             assert r in valid_roles, f"Papel '{r}' deve ser permitido pela constraint chkAccountsInternalRole."
+        assert "server" in valid_roles
+        assert "administrator" in valid_roles
 
     def test_session_subject_type_constraint_accepts_only_citizen_and_internal(self):
         valid_subject_types = {"citizen", "internal"}

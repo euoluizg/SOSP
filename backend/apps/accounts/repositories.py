@@ -300,6 +300,16 @@ class CitizenInMemoryRepository:
                 count += 1
         return count
 
+    def change_internal_user_password(self, user_id: str, new_password_hash: str) -> bool:
+        if hasattr(self, "_internal_users"):
+            for u in self._internal_users.values():
+                if str(u.get("id")) == str(user_id):
+                    u["passwordHash"] = new_password_hash
+                    u["mustChangePassword"] = False
+                    self.revoke_all_sessions(str(user_id))
+                    return True
+        return True
+
 class CitizenDjangoORMRepository:
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
 
@@ -354,11 +364,12 @@ class CitizenDjangoORMRepository:
                             "blockedUntil": row[5].isoformat() if row[5] else None,
                             "loginAttempts": row[6] or 0,
                             "role": row[7] or "citizen",
+                            "mustChangePassword": False,
                         }
 
                     # 1.2 Consulta usuário interno (servidores, gestores e administradores) via função cirúrgica sob RLS
                     cur.execute(
-                        "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
+                        "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active, must_change_password "
                         "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
                         [clean_cpf]
                     )
@@ -384,6 +395,7 @@ class CitizenDjangoORMRepository:
                             "isActive": irow[9],
                             "blockedUntil": None,
                             "loginAttempts": 0,
+                            "mustChangePassword": bool(irow[10]) if len(irow) > 10 else False,
                         }
                     return None
             except Exception as e:
@@ -404,7 +416,9 @@ class CitizenDjangoORMRepository:
             "id", "cpf", "full_name", "email", "password_hash", "is_active", "blocked_until", "login_attempts"
         ).first()
         if c:
-            return self._to_dict(c)
+            res = self._to_dict(c)
+            res["mustChangePassword"] = False
+            return res
 
         # 3. Busca por Usuário Interno (servidores, gestores, administradores)
         u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
@@ -428,6 +442,7 @@ class CitizenDjangoORMRepository:
                 "agencyId": str(u.agency_id) if u.agency_id else None,
                 "unitId": str(u.unit_id) if u.unit_id else None,
                 "canManageCatalog": u.can_manage_catalog,
+                "mustChangePassword": bool(getattr(u, "must_change_password", False)),
             }
 
         return None
@@ -614,6 +629,19 @@ class CitizenDjangoORMRepository:
         u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
         if u:
             return bool(InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(password_hash=password_hash))
+        return False
+
+    def change_internal_user_password(self, user_id: str, new_password_hash: str) -> bool:
+        from .models import InternalUser
+        from django.utils import timezone
+        updated = InternalUser.objects.filter(id=user_id, is_active=True, deleted_at__isnull=True).update(
+            password_hash=new_password_hash,
+            must_change_password=False,
+            updated_at=timezone.now(),
+        )
+        if updated:
+            self.revoke_all_sessions(str(user_id))
+            return True
         return False
 
     def set_recovery_code(self, cpf: str, code: str) -> None:

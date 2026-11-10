@@ -32,7 +32,7 @@ def align_accounts_schema_forward(apps, schema_editor):
                 -- Harmoniza e garante constraints oficiais de accountsInternalUser de forma idempotente
                 ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalRole;
                 ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRole
-                    CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant'));
+                    CHECK (role IN ('superadmin', 'admin', 'gestor', 'server', 'manager', 'servant', 'administrator'));
 
                 ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalRegistration;
                 ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRegistration

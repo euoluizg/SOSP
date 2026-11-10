@@ -281,6 +281,52 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Altera a senha do usuário autenticado (obrigatório no primeiro acesso institucional)
+      operationId: changePassword
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                  description: Senha atual ou provisória temporária
+                newPassword:
+                  type: string
+                  format: password
+                  description: Nova senha (mínimo 8 caracteres, maiúscula, minúscula, dígito e símbolo)
+                confirmPassword:
+                  type: string
+                  format: password
+                  description: Confirmação da nova senha
+      responses:
+        '200':
+          description: Senha alterada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+                  mustChangePassword:
+                    type: boolean
+        '400':
+          description: Senha atual incorreta, nova senha fraca ou igual à anterior
+        '401':
+          description: Usuário não autenticado ou token inválido
+
   /citizens/me:
     get:
       tags: [Citizens]

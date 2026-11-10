@@ -371,6 +371,7 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
                 False,
                 "argon2_hash_dummy",
                 True,
+                True,
             )
 
         def __enter__(self):
@@ -393,4 +394,5 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
     assert auth_data["unitId"] == str(fake_unit_id)
     assert auth_data["canManageCatalog"] is False
     assert auth_data["isActive"] is True
+    assert auth_data["mustChangePassword"] is True
 
