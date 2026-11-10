@@ -1,234 +1,121 @@
-# SOSP — Runbook de Implantação e Migração Supervisionada: Autenticação Institucional em Staging
+# SOSP — Runbook supervisionado da autenticação institucional em staging
 
-> **Documento:** `docs/deployment/institutional_auth_staging_runbook.md`  
-> **Ambiente Alvo:** Staging (Render Backend + Supabase PostgreSQL 17.11 — Projeto `cidtcgfowvgwgggvhbym`)  
-> **Responsáveis:** Arthur Franco (Tech Lead, Back-end e DevOps) / Operador Autorizado  
-> **Data:** Novembro / 2026  
-> **Status:** Homologado para Execução Supervisionada  
+> **Ambiente:** Render (backend), Cloudflare Workers (portal) e Supabase PostgreSQL 17, projeto `cidtcgfowvgwgggvhbym`.
+> **Responsáveis:** Tech Lead de Back-end/DevOps e operador autorizado.
+> **Estado em 10/11/2026:** **RASCUNHO — NÃO EXECUTAR EM STAGING**. Falta ensaio da sequência e da recuperação em PostgreSQL 17 isolado, confirmação de backup restaurável e autorização humana específica.
+> **Escopo:** somente autenticação de usuários institucionais. Não criar contas de cidadão ou dados fictícios de órgão/unidade.
 
----
+## 1. Sequência e fontes canônicas
 
-## 1. Contexto e Justificativa Arquitetural
+1. `backend/apps/accounts/migrations/0002_add_gender_description_and_unit_to_accounts.py` altera colunas, índice e constraints e registra o estado no `django_migrations`. Sua reversão é `RunPython.noop`; **não** usar `migrate accounts 0001_initial` como rollback físico.
+2. `scripts/staging_ddl/04_apply_institutional_auth_and_schema_patch.sql` é a **única definição executável** da função institucional de 11 colunas. Ele exige a migration `accounts.0002` aplicada, configura `sosp_security` e concede `EXECUTE` a `sosp_runtime_role`. Não copiar uma segunda versão da função para o SQL Editor.
+3. `sosp_runtime_app` herda `sosp_runtime_role` no projeto observado em 10/11/2026. Confirmar novamente a herança e o privilégio efetivo antes de cada execução.
+4. `backend/render-build.sh` não executa migrations. A aplicação e a publicação são etapas distintas.
 
-### 1.1. Separação Estrita de Responsabilidades e a Regra do `render-build.sh`
+O patch SQL e a migration não devem modificar as mesmas colunas/constraints na mesma implantação. A ordem aprovada para ensaio é: **migration real → verificação física e do histórico → função SQL → verificação com a role de runtime → publicação → provisionamento**. Não usar `--fake`.
 
-O script `backend/render-build.sh` possui uma salvaguarda inegociável documentada explicitamente:
+A `0002` combina mudanças aditivas (`genderDescription`, `unitId`, índice) e substituição de constraints. Os comandos `ALTER TABLE` podem bloquear escritas durante a aplicação; medir tamanho das tabelas, inspecionar locks e definir janela de execução antes de staging. O script da função faz `DROP/CREATE` dentro de uma transação, o que também exige teste de compatibilidade com a versão do backend em serviço.
 
-```bash
-# REGRA CRÍTICA DE SEGURANÇA:
-# NUNCA adicionar 'python manage.py migrate' neste script.
-# O schema no Supabase PostgreSQL 17.11 já está implantado (4C.2/4D.2)
-# e qualquer migração deve seguir processo administrativo supervisionado.
-```
+**Evidência local em 10/11/2026:** em PostgreSQL 18.6 isolado, o Django aplicou `accounts.0001` e `accounts.0002`; o script institucional concluiu duas vezes; a função retornou 11 campos com `SECURITY DEFINER`, `search_path` fixo e `EXECUTE` apenas para `sosp_runtime_role`. Com uma linha sintética em transação revertida, a consulta direta como `sosp_runtime_app` retornou zero linhas sob RLS e a função encontrou a conta. Em outro banco isolado com somente `accounts.0001`, o script falhou na pré-condição e preservou a função de 10 campos. **Essa evidência não substitui o ensaio exigido em PostgreSQL 17.**
 
-Esta regra decorre das decisões arquiteturais **ADR-001** (Monólito Modular), **ADR-003** (Segurança e RBAC) e **ADR-008** (Supabase Gerenciado):
+## 2. Estado conhecido e pré-voo somente leitura
 
-1. **Princípio do Menor Privilégio no Runtime:** A aplicação em execução no Render conecta-se ao banco sob a role restrita `sosp_runtime_app`. Essa role possui permissões exclusivas de DML (`SELECT`, `INSERT`, `UPDATE`) e execução cirúrgica de funções (`SECURITY DEFINER`), **sem permissões de DDL** (`CREATE TABLE`, `ALTER TABLE`, `DROP`, `GRANT`).
-2. **Prevenção de Locks e Concorrência:** Comandos de migração automática em build de contêineres podem exigir bloqueios exclusivos de schema (`AccessExclusiveLock`), gerando *race conditions* durante deploys contínuos (*rolling deploys*) ou derrubando instâncias ativas caso ocorra *timeout* de migração.
-3. **Isolamento de Staging vs. Produção:** Toda alteração de schema em banco de dados compartilhado/remoto deve ser realizada exclusivamente por operador humano autenticado com a role de alta permissão (`postgres`), precedida por verificação de integridade e seguida por testes de aceitação.
+O retrato de 10/11/2026 mostra `accounts.0001_initial` aplicado, `accounts.0002` pendente, `unitId` ausente em `accountsInternalUser`, ambas as funções de autenticação ausentes, zero usuários institucionais, zero cidadãos, zero unidades ativas e zero órgãos SSP ativos. A role `sosp_runtime_app` herda `sosp_runtime_role`; RLS está ativa nas tabelas de contas e sessões. **Este retrato não autoriza alterações e deve ser reconfirmado.**
 
----
+Antes de qualquer operação, registrar em canal operacional privado: projeto e ambiente, branch e SHA do backend, revisão do PR #38, operador, janela, ponto de conexão, identidade administrativa, método de backup, procedimento de restauração e pessoa que decide interromper. Não registrar senha, hash, token, URL de conexão completa ou saída com dados pessoais.
 
-## 2. Checklist de Pré-Voo (Pre-Flight Checklist)
+Conectar por sessão direta ou *Session Pooler* na porta `5432`, conforme a opção **Connect** do projeto; confirmar host, usuário e projeto no gestor de segredos. A porta `6543` usa *Transaction Pooler* e não serve para este procedimento com estado de sessão ([modos de conexão do Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres)). O Django lê `DB_ENGINE`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT` e opções SSL de `backend/config/settings/base.py`; **`DATABASE_URL` isolada não configura essa conexão**. Definir as variáveis administrativas pelo gestor de segredos, sem colocá-las em comandos versionados ou histórico do shell. Exigir `DB_ENGINE=postgresql` e conferir o alias `default` antes de `showmigrations` ou `migrate`.
 
-Antes de executar qualquer instrução no Supabase Staging:
-
-- [ ] **1. Identificação do Projeto:** Confirmar que a conexão aponta para o projeto de staging `cidtcgfowvgwgggvhbym`.
-- [ ] **2. Ponto de Conexão (Pooler vs. Session):**
-  - Para comandos DDL / Migrations: Utilizar a porta direta de sessão **`5432`** (Session Pooler) ou o **Supabase SQL Editor**.
-  - **Atenção:** A porta `6543` (Transaction Pooler / PgBouncer) não suporta comandos transacionais de DDL ou `prepared statements` de schema.
-- [ ] **3. Backup e Snapshots:** Confirmar no painel do Supabase (*Database* -> *Backups*) que há snapshot recente disponível para restauração imediata.
-- [ ] **4. Verificação de Locks Concorrentes:**
-  ```sql
-  SELECT pid, usename, query, state, age(clock_timestamp(), query_start) AS duration
-  FROM pg_stat_activity
-  WHERE wait_event_type = 'Lock' OR state = 'active'
-  ORDER BY duration DESC;
-  ```
-- [ ] **5. Zero Modificações Fictícias:** Jamais criar órgãos ou unidades falsas no banco remoto. Respeitar o catálogo oficial.
-
----
-
-## 3. Diagnóstico e Comparação de Schema
-
-Execute as consultas abaixo no **Supabase SQL Editor** como role `postgres`:
-
-### 3.1. Verificação de Migrações Aplicadas
+Consultas de pré-voo, sem conteúdo de usuários:
 
 ```sql
-SELECT app, name, applied 
-FROM django_migrations 
-WHERE app = 'accounts' 
-ORDER BY applied DESC;
-```
+SELECT current_database(), current_user, current_setting('server_version_num') AS server_version;
 
-*Critério de Aceite:* Verificar se as migrações `0001_initial` e `0002_fix_constraints_and_registration` constam na tabela.
+SELECT app, name, applied FROM public.django_migrations
+WHERE app = 'accounts' ORDER BY applied;
 
-### 3.2. Verificação das Funções de Autenticação sob Menor Privilégio (`sosp_security`)
-
-```sql
-SELECT routine_schema, routine_name, security_type, data_type
-FROM information_schema.routines
-WHERE routine_schema = 'sosp_security'
-  AND routine_name IN ('authenticate_citizen_by_cpf', 'authenticate_internal_user_by_cpf');
-```
-
-*Critério de Aceite:*
-- `authenticate_citizen_by_cpf`: `security_type = 'DEFINER'`, retorna 8 colunas (`citizen_id`, `full_name`, `email`, `password_hash`, `is_active`, `blocked_until`, `login_attempts`, `role`).
-- `authenticate_internal_user_by_cpf`: `security_type = 'DEFINER'`, retorna 11 colunas incluindo `must_change_password`.
-
-### 3.3. Verificação da Coluna `mustChangePassword` em `accountsInternalUser`
-
-```sql
-SELECT column_name, data_type, column_default, is_nullable
+SELECT table_name, column_name, data_type, is_nullable
 FROM information_schema.columns
-WHERE table_name = 'accountsinternaluser'
-  AND column_name = 'mustchangepassword';
+WHERE table_schema = 'public'
+  AND table_name IN ('accountscitizen', 'accountsinternaluser')
+  AND column_name IN ('genderdescription', 'unitid', 'mustchangepassword')
+ORDER BY table_name, column_name;
+
+SELECT c.conrelid::regclass::text AS table_name, c.conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+WHERE c.conrelid IN ('public.accountsinternaluser'::regclass, 'public.accountssession'::regclass)
+  AND c.contype = 'c'
+ORDER BY table_name, c.conname;
+
+SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS args,
+       p.prosecdef AS security_definer, pg_get_userbyid(p.proowner) AS owner
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'sosp_security'
+  AND p.proname IN ('authenticate_citizen_by_cpf', 'authenticate_internal_user_by_cpf');
+
+SELECT pg_has_role('sosp_runtime_app', 'sosp_runtime_role', 'USAGE') AS runtime_inherits_role;
+
+SELECT n.nspname, has_schema_privilege('sosp_runtime_app', n.oid, 'USAGE') AS runtime_schema_usage
+FROM pg_namespace n WHERE n.nspname = 'sosp_security';
+
+SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled,
+       c.relforcerowsecurity AS rls_forced
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relname IN ('accountscitizen', 'accountsinternaluser', 'accountssession');
+
+SELECT pid, usename, state, wait_event_type, wait_event,
+       age(clock_timestamp(), query_start) AS duration
+FROM pg_stat_activity
+WHERE wait_event_type = 'Lock' OR state = 'active';
 ```
 
----
+Conferir também policies RLS, grants efetivos, contagens de contas/órgãos/unidades e linhas incompatíveis com as novas constraints. Não imprimir o texto de queries ativas; ele pode conter dados sensíveis. Se `sosp_security` não existir, a consulta de privilégio do schema retorna zero linhas; repetir após a criação.
 
-## 4. Ordem e Comandos de Execução Supervisionada
+## 3. Portões antes de staging
 
-### Passo 1: Execução das Migrações Django (Se Pendentes)
+- [ ] PR #38 e SHA do artefato a publicar identificados; diff e testes revisados.
+- [ ] Ensaio em PostgreSQL 17 **isolado**: aplicar `0001` real, executar `python manage.py migrate accounts 0002_add_gender_description_and_unit_to_accounts` com Django, executar o patch SQL, comparar schema e `django_migrations` antes/depois e testar função/RLS com a role efetiva. O teste de segurança existente que copia trechos de DDL não substitui esse ensaio da migration real.
+- [ ] Verificar que a função de 11 colunas tem `SECURITY DEFINER`, `search_path` restrito, `PUBLIC` sem `EXECUTE`, `sosp_runtime_role` com `EXECUTE`, herança para `sosp_runtime_app` e acesso direto às contas bloqueado por RLS.
+- [ ] Cobrir login institucional sem função de cidadão, assinatura legada de 10 colunas, ausência da função institucional, erro de permissão, troca obrigatória, revogação de sessão, token antigo/manipulado e servidor sem lotação.
+- [ ] Confirmar backup **existente e restaurável**, ponto de recuperação, perda de dados admissível e ensaio de restauração em ambiente isolado. A organização Supabase foi consultada em 10/11/2026 e está no plano **Free**, que não oferece backup diário automático; preparar um dump lógico verificável antes da migration ([política de backups do Supabase](https://supabase.com/docs/guides/platform/backups)).
+- [ ] Aprovação humana explícita para cada operação remota sensível: migration/SQL, provisionamento, alteração de credenciais, publicação, merge ou deploy.
 
-Conecte-se ao terminal operacional com as variáveis administrativas de staging:
+**Parar** se conexão/role forem incertas, houver diferença não explicada no schema ou histórico, backup não verificável, função incompatível, grants/RLS inesperados, falha crítica no ensaio ou necessidade de dados fictícios.
+
+## 4. Execução futura, somente após os portões e autorização
+
+O operador deve usar um terminal administrativo temporário com as variáveis de `DB_*` carregadas pelo gestor de segredos. O processo não deve usar a identidade restrita do Render para DDL e não deve imprimir a configuração completa do banco.
 
 ```bash
 cd backend
-export DATABASE_URL="postgresql://postgres:[SENHA_POSTGRES]@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
 python manage.py showmigrations accounts
-python manage.py migrate accounts
+python manage.py migrate accounts 0002_add_gender_description_and_unit_to_accounts --plan
+python manage.py migrate accounts 0002_add_gender_description_and_unit_to_accounts
 ```
 
-### Passo 2: Sincronização da Função de Autenticação Institucional (SQL Editor)
+Após a migration, confirmar que `accounts.0002_add_gender_description_and_unit_to_accounts` consta no histórico e que `genderDescription`, `unitId`, índice e constraints esperados existem. Interromper se histórico e schema não corresponderem. Para o `psql`, carregar `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` e SSL pelo gestor de segredos (as variáveis `DB_*` do Django não são lidas automaticamente pelo `psql`). Abrir uma conexão administrativa de sessão e confirmar o alvo **na mesma sessão**, antes de executar o patch canônico uma vez:
 
-Caso a função `sosp_security.authenticate_internal_user_by_cpf` precise ser atualizada para suportar a 11ª coluna (`must_change_password`) com estrito menor privilégio:
+```bash
+cd ..
+psql -X -v ON_ERROR_STOP=1
+```
 
 ```sql
--- Executar como role postgres no Supabase SQL Editor
-CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
-RETURNS TABLE (
-    user_id UUID,
-    full_name VARCHAR,
-    email VARCHAR,
-    registration_number VARCHAR,
-    agency_id UUID,
-    unit_id UUID,
-    role VARCHAR,
-    can_manage_catalog BOOLEAN,
-    password_hash TEXT,
-    is_active BOOLEAN,
-    must_change_password BOOLEAN
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-    v_clean_cpf VARCHAR(11);
-BEGIN
-    v_clean_cpf := regexp_replace(p_cpf, '[^0-9]', '', 'g');
-    IF length(v_clean_cpf) != 11 THEN
-        RETURN;
-    END IF;
-
-    RETURN QUERY
-    SELECT 
-        u.id AS user_id,
-        u.fullname AS full_name,
-        u.email,
-        u.registrationnumber AS registration_number,
-        u.agencyid AS agency_id,
-        u.unitid AS unit_id,
-        u.role,
-        u.canmanagecatalog AS can_manage_catalog,
-        u.passwordhash AS password_hash,
-        u.isactive AS is_active,
-        COALESCE(u.mustchangepassword, true) AS must_change_password
-    FROM accountsinternaluser u
-    WHERE u.cpf = v_clean_cpf
-      AND u.isactive = true
-      AND u.deletedat IS NULL
-    LIMIT 1;
-END;
-$$;
-
--- Restringe privilégios: Revoga acesso público e concede exclusivamente a sosp_runtime_app
-REVOKE ALL ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) TO sosp_runtime_app;
+SELECT current_database(), current_user, current_setting('server_version_num') AS server_version;
+\i scripts/staging_ddl/04_apply_institutional_auth_and_schema_patch.sql
 ```
 
-### Passo 3: Provisionamento Idempotente dos Usuários Institucionais
+Os comandos acima pressupõem que o operador iniciou na **raiz do repositório** e recebeu a conexão administrativa de forma segura. Confirmar também o host/projeto pelo gestor de segredos; `current_database()` sozinho pode ser igual em projetos diferentes. Não preencher senha em argumento, URL ou variável exportada no histórico. Não usar o SQL Editor para colar uma segunda definição da função.
 
-Execute o comando canônico `provision_homologation_users`:
+Verificar metadados da função e privilégios, incluindo `has_function_privilege('sosp_runtime_app', 'sosp_security.authenticate_internal_user_by_cpf(character varying)', 'EXECUTE')`. Testar invocação com a identidade de runtime em transação separada, sem registrar CPF, hash ou resposta bruta. Testar RLS com uma conta de ensaio no PostgreSQL isolado; no staging vazio, `count(*) = 0` sozinho **não prova** isolamento.
 
-#### Cenário A — Com Órgão SSP e Unidade Reais Cadastrados:
-```bash
-python manage.py provision_homologation_users \
-  --agency-acronym SSP \
-  --unit-name "Já! Centro" \
-  --interactive
-```
+Somente depois dessas verificações, publicar backend e portal com os SHAs aprovados. O provisionamento das duas contas institucionais exige autorização separada. Usar `provision_homologation_users --interactive`; não usar flags de senha em argumentos. O comando exige duas senhas fornecidas por entrada sem eco ou gestor de segredos e não grava credenciais em arquivo. Sem SSP e unidade reais, `--allow-unlinked` permite apenas homologar autenticação: ações operacionais do servidor devem continuar bloqueadas. Não criar órgão/unidade fictícios nem conta de cidadão.
 
-#### Cenário B — Staging Atual (Zero Unidades Cadastradas / Sem SSP):
-```bash
-python manage.py provision_homologation_users \
-  --allow-unlinked \
-  --interactive
-```
+## 5. Homologação e recuperação
 
-> **Aviso de Fail-Closed:** No Cenário B, o servidor é provisionado com `unit_id = None`. Sob a regra **RN-36** e **ADR-003**, endpoints operacionais de agendamento e atendimento retornarão `403 Forbidden` até que o servidor seja vinculado a uma unidade real pelo Administrador Geral no painel `/admin/usuarios`.
+Homologar em navegador e API: login por CPF, resposta `mustChangePassword=true`, bloqueio dos endpoints protegidos antes da troca, troca de senha, revogação do token anterior, revalidação autoritativa do estado da conta, permissões por perfil, isolamento de órgão/unidade e bloqueio do servidor sem lotação. Registrar separadamente resultados de código, testes locais, PostgreSQL isolado, Supabase, Render, Cloudflare e navegador.
 
----
+**Não executar** `migrate accounts 0001_initial` como recuperação: a reversão da `0002` é `noop` e o histórico ficaria incoerente. O script `04_rollback_institutional_auth_patch.sql` restaura uma função de dez colunas, mas a função estava ausente no staging de 10/11/2026; ele **não reproduz esse baseline** e não deve ser usado neste ambiente sem plano específico ensaiado. A alternativa de correção progressiva ou restauração precisa ser decidida conforme o ponto de falha e o backup verificado. Uma restauração completa pode perder escritas posteriores e exige aprovação própria.
 
-## 5. Verificação Pós-Execução (Post-Flight Verification)
-
-Execute as seguintes validações no SQL Editor do Supabase:
-
-### 5.1. Teste de Invocação Simulada sob `sosp_runtime_app`
-
-```sql
-SET ROLE sosp_runtime_app;
-
--- 1. Teste Admin Geral
-SELECT user_id, full_name, role, must_change_password 
-FROM sosp_security.authenticate_internal_user_by_cpf('99988877714');
-
--- 2. Teste Servidor Operacional
-SELECT user_id, full_name, role, unit_id, must_change_password 
-FROM sosp_security.authenticate_internal_user_by_cpf('33366699957');
-
--- 3. Confirmação de Menor Privilégio (SELECT direto DEVE retornar 0 linhas via RLS)
-SELECT count(*) FROM accountsinternaluser;
-
-RESET ROLE;
-```
-
-*Critérios de Sucesso:*
-1. Admin retorna `role = 'superadmin'` e `must_change_password = true`.
-2. Servidor retorna `role = 'server'` e `must_change_password = true`.
-3. `SELECT count(*)` como `sosp_runtime_app` retorna `0` linhas (RLS ativa).
-
-### 5.2. Validação da Sessão e Troca de Senha na API
-
-1. Realizar login institucional em `POST /api/v1/auth/login`.
-2. Confirmar que a resposta HTTP 200 contém `"mustChangePassword": true`.
-3. Acessar endpoint protegido `/api/v1/audit/events` e confirmar `403 Forbidden` (`CHANGE_PASSWORD_REQUIRED`).
-4. Executar troca de senha em `POST /api/v1/auth/change-password`.
-5. Confirmar novo token com `"mustChangePassword": false` e acesso liberado às telas autorizadas.
-
----
-
-## 6. Procedimento de Rollback Não-Destrutivo
-
-Caso ocorra qualquer inconsistência ou necessidade de reversão:
-
-1. **Reversão de Migração no Django:**
-   ```bash
-   python manage.py migrate accounts 0001_initial
-   ```
-2. **Compatibilidade com Assinatura Legada:**
-   O código do backend (`CitizenDjangoORMRepository.get_internal_user_by_cpf_for_auth`) possui fallback transparente e seguro: caso a função retorne 10 colunas, ela assume de forma estrita `mustChangePassword = True` (*fail-closed*), garantindo que nenhum usuário consiga contornar a troca de senha mesmo em caso de reversão de schema.
-3. **Preservação dos Dados:**
-   Jamais execute comandos de limpeza destrutiva (`DROP TABLE`, `TRUNCATE` ou `CASCADE`). Todas as entidades utilizam exclusão lógica (`deletedAt`).
+Se a etapa falhar, parar novas publicações e provisionamento, preservar evidências sem segredos, identificar o último estado consistente e submeter o plano de correção/restauração ao responsável. Não remover colunas, constraints, tabelas ou registros de negócio de forma improvisada.

@@ -118,6 +118,32 @@ def test_provision_without_preexisting_agency_fails_without_allow_unlinked(setti
 
 
 @pytest.mark.django_db
+def test_provision_in_production_requires_force_and_confirm(settings, monkeypatch):
+    """Uma flag isolada não autoriza provisionamento em ambiente de produção."""
+    settings.REPOSITORY_BACKEND = "orm"
+    monkeypatch.setenv("DJANGO_ENV", "production")
+
+    for flags in ({}, {"force_production": True}, {"confirm": True}):
+        with pytest.raises(CommandError, match="--force-production e --confirm"):
+            call_command("provision_homologation_users", **flags)
+
+    assert InternalUser.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_provision_without_private_credentials_does_not_create_accounts(settings, monkeypatch):
+    """Execução sem entrada privada não cria contas com senhas desconhecidas."""
+    settings.REPOSITORY_BACKEND = "orm"
+    monkeypatch.delenv("HOMOLOG_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("HOMOLOG_SERVER_PASSWORD", raising=False)
+
+    with pytest.raises(CommandError, match="O comando não gera nem grava credenciais"):
+        call_command("provision_homologation_users", allow_unlinked=True, no_input=True)
+
+    assert InternalUser.objects.count() == 0
+
+
+@pytest.mark.django_db
 def test_provision_with_allow_unlinked_creates_server_without_unit(settings):
     """Com --allow-unlinked, servidor é provisionado sem unidade vinculada (fail-closed)."""
     settings.REPOSITORY_BACKEND = "orm"
@@ -360,6 +386,7 @@ def test_server_operational_first_access_flow(client, ssp_agency_and_unit):
     server_tmp = _dynamic_secret()
     call_command(
         "provision_homologation_users",
+        admin_password=_dynamic_secret(),
         server_password=server_tmp,
     )
 
@@ -408,7 +435,12 @@ def test_decoupled_auth_admin_succeeds_when_citizen_function_missing(client, mon
     """
     from apps.accounts.repositories import CitizenDjangoORMRepository, FunctionNotFoundError
     admin_tmp = _dynamic_secret()
-    call_command("provision_homologation_users", admin_password=admin_tmp, allow_unlinked=True)
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_tmp,
+        server_password=_dynamic_secret(),
+        allow_unlinked=True,
+    )
 
     # Simula ausência da função de cidadão no PostgreSQL
     def mock_missing_citizen_fn(self, cpf):
@@ -503,7 +535,12 @@ def test_anti_bypass_jwt_token_tampering_rejected(client):
     from common.security.authentication import generate_sosp_token
 
     admin_tmp = _dynamic_secret()
-    call_command("provision_homologation_users", admin_password=admin_tmp, allow_unlinked=True)
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_tmp,
+        server_password=_dynamic_secret(),
+        allow_unlinked=True,
+    )
     admin = InternalUser.objects.get(cpf="99988877714")
     assert admin.must_change_password is True
 
@@ -534,6 +571,7 @@ def test_provision_with_explicit_agency_and_unit_ids(ssp_agency_and_unit):
     out = io.StringIO()
     call_command(
         "provision_homologation_users",
+        admin_password=_dynamic_secret(),
         server_password=server_tmp,
         agency_id=str(agency_ssp.id),
         unit_id=str(unit_central.id),

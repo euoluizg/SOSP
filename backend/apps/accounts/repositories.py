@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import secrets
+import sys
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
@@ -21,22 +22,33 @@ from contextlib import contextmanager
 
 @contextmanager
 def _safe_atomic_block():
-    """Cria savepoint atômico se o banco estiver acessível; ignora em mocks de cursor sem django_db."""
+    """Cria savepoint e preserva rollback; aceita mocks sem banco configurado."""
     try:
         from django.db import transaction
         sp = transaction.atomic()
         sp.__enter__()
-        in_sp = True
-    except (RuntimeError, Exception):
-        in_sp = False
+    except RuntimeError as exc:
+        if not getattr(settings, "TESTING", False) or "Database access not allowed" not in str(exc):
+            raise
+        yield
+        return
     try:
         yield
-    finally:
-        if in_sp:
-            try:
-                sp.__exit__(None, None, None)
-            except Exception:
-                pass
+    except BaseException:
+        sp.__exit__(*sys.exc_info())
+        raise
+    else:
+        sp.__exit__(None, None, None)
+
+
+def _postgres_sqlstate(exc: Exception) -> Optional[str]:
+    """Recupera SQLSTATE também quando Django encapsula a exceção do driver."""
+    while exc is not None:
+        code = getattr(exc, "sqlstate", None) or getattr(exc, "pgcode", None)
+        if code:
+            return code
+        exc = getattr(exc, "__cause__", None)
+    return None
 
 
 class FunctionNotFoundError(Exception):
@@ -452,9 +464,7 @@ class CitizenDjangoORMRepository:
                             }
                         return None
             except Exception as e:
-                err_str = str(e).lower()
-                pgcode = getattr(e, "pgcode", None)
-                if pgcode == "42883" or "42883" in err_str or "does not exist" in err_str:
+                if _postgres_sqlstate(e) == "42883":
                     raise FunctionNotFoundError("Função sosp_security.authenticate_citizen_by_cpf não encontrada.") from e
                 raise
         else:
@@ -494,11 +504,12 @@ class CitizenDjangoORMRepository:
                                 )
                                 irow = cur.fetchone()
                         except Exception as inner_e:
-                            inner_str = str(inner_e).lower()
-                            inner_code = getattr(inner_e, "pgcode", None)
-                            if inner_code == "42883" or "42883" in inner_str or "does not exist" in inner_str:
+                            inner_code = _postgres_sqlstate(inner_e)
+                            if inner_code == "42883":
                                 raise FunctionNotFoundError("Função sosp_security.authenticate_internal_user_by_cpf não encontrada.") from inner_e
-                            # Fallback de retrocompatibilidade para assinatura de 10 colunas em caso de schema anterior
+                            if inner_code != "42703" or "must_change_password" not in str(inner_e).lower():
+                                raise
+                            # Fallback apenas quando a assinatura antiga não contém a 11ª coluna.
                             with _safe_atomic_block():
                                 cur.execute(
                                     "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
@@ -540,9 +551,7 @@ class CitizenDjangoORMRepository:
             except FunctionNotFoundError:
                 raise
             except Exception as e:
-                err_str = str(e).lower()
-                pgcode = getattr(e, "pgcode", None)
-                if pgcode == "42883" or "42883" in err_str or "does not exist" in err_str:
+                if _postgres_sqlstate(e) == "42883":
                     raise FunctionNotFoundError("Função sosp_security.authenticate_internal_user_by_cpf não encontrada.") from e
                 raise
         else:

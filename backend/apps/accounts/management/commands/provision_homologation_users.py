@@ -1,7 +1,5 @@
 import getpass
 import os
-import secrets
-import string
 import sys
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -17,25 +15,6 @@ def _mask_cpf(cpf: str) -> str:
     if len(clean) == 11:
         return f"{clean[:3]}.***.***-{clean[-2:]}"
     return "***"
-
-
-def _generate_secure_password(length: int = 16) -> str:
-    """Gera uma senha segura com maiúsculas, minúsculas, dígitos e símbolos especiais."""
-    uppercase = string.ascii_uppercase
-    lowercase = string.ascii_lowercase
-    digits = string.digits
-    special = "!@#$%^&*"
-    chars = uppercase + lowercase + digits + special
-
-    password = [
-        secrets.choice(uppercase),
-        secrets.choice(lowercase),
-        secrets.choice(digits),
-        secrets.choice(special),
-    ]
-    password += [secrets.choice(chars) for _ in range(length - 4)]
-    secrets.SystemRandom().shuffle(password)
-    return "".join(password)
 
 
 class Command(BaseCommand):
@@ -102,12 +81,6 @@ class Command(BaseCommand):
             help="Permite a execução em ambiente de produção após confirmação formal de homologação.",
         )
         parser.add_argument(
-            "--output-credentials-file",
-            type=str,
-            default=None,
-            help="Caminho de arquivo local seguro para salvar senhas geradas aleatoriamente (permissão 0600).",
-        )
-        parser.add_argument(
             "--interactive",
             action="store_true",
             help="Força solicitação interativa de senhas via getpass (sem eco no terminal).",
@@ -129,7 +102,9 @@ class Command(BaseCommand):
             or getattr(settings, "DJANGO_ENV", "")
             or os.environ.get("DJANGO_ENV", "")
         ).lower()
-        if env_name in ("production", "prod") and not options.get("force_production"):
+        if env_name in ("production", "prod") and not (
+            options.get("force_production") and options.get("confirm")
+        ):
             raise CommandError(
                 f"Operação bloqueada por política de segurança: O provisionamento de homologação "
                 f"não pode ser executado no ambiente de produção ('{env_name}') sem as flags "
@@ -245,15 +220,11 @@ class Command(BaseCommand):
             if not server_pwd:
                 server_pwd = getpass.getpass("Digite a senha temporária para João Servidor Central: ").strip()
 
-        admin_pwd_generated = False
-        if not admin_pwd:
-            admin_pwd = _generate_secure_password(16)
-            admin_pwd_generated = True
-
-        server_pwd_generated = False
-        if not server_pwd:
-            server_pwd = _generate_secure_password(16)
-            server_pwd_generated = True
+        if not admin_pwd or not server_pwd:
+            raise CommandError(
+                "Informe duas senhas temporárias distintas via --interactive ou gestor de segredos. "
+                "O comando não gera nem grava credenciais em arquivo."
+            )
 
         if admin_pwd == server_pwd:
             raise CommandError("Por conformidade de segurança, as senhas do Administrador e do Servidor devem ser distintas.")
@@ -358,23 +329,6 @@ class Command(BaseCommand):
                         f"   - Painel inicial de acesso: /servidor/painel"
                     )
                 )
-
-        # 5. Escrita Segura de Arquivo de Credenciais (Se Solicitado)
-        output_file = options.get("output_credentials_file")
-        if output_file:
-            try:
-                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-                mode = 0o600
-                fd = os.open(output_file, flags, mode)
-                with os.fdopen(fd, "w") as f:
-                    f.write("# SOSP — Credenciais Provisórias de Homologação (Confidencial)\n")
-                    f.write(f"HOMOLOG_ADMIN_PASSWORD={admin_pwd}\n")
-                    f.write(f"HOMOLOG_SERVER_PASSWORD={server_pwd}\n")
-                self.stdout.write(
-                    self.style.SUCCESS(f"✓ Credenciais temporárias gravadas com segurança em '{output_file}' (permissão 0600).")
-                )
-            except Exception as e:
-                self.stdout.write(self.style.ERROR(f"Falha ao salvar arquivo de credenciais: {e}"))
 
         self.stdout.write("-----------------------------------------------------------------")
         self.stdout.write(
