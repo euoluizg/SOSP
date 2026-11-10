@@ -168,6 +168,24 @@ export interface CitizenProfile {
   avatarUrl?: string;
 }
 
+export interface UserSession {
+  id: string;
+  fullName: string;
+  cpf: string;
+  email: string;
+  role: string;
+  agencyId?: string | null;
+  unitId?: string | null;
+  mustChangePassword?: boolean;
+}
+
+export interface LoginResponse {
+  token: string;
+  tokenType: string;
+  expiresIn: number;
+  citizen: UserSession;
+}
+
 /** RFC 7807 — Problem Details */
 export interface ProblemDetails {
   type: string;

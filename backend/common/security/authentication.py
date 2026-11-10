@@ -64,6 +64,7 @@ class SospUser:
         email: str = "",
         is_active: bool = True,
         unit_id: str | uuid.UUID | None = None,
+        must_change_password: bool = False,
     ):
         self.id = uuid.UUID(str(user_id)) if isinstance(user_id, str) and len(user_id) == 36 else user_id
         self.role = role
@@ -73,6 +74,7 @@ class SospUser:
         self.full_name = full_name
         self.email = email
         self.is_active = is_active
+        self.must_change_password = bool(must_change_password)
         self.is_authenticated = True
         self.is_anonymous = False
 
@@ -123,6 +125,7 @@ def generate_sosp_token(
     email: str = "",
     expires_in_seconds: int = 1800,  # 30 minutos (RN-28)
     unit_id: str | uuid.UUID | None = None,
+    must_change_password: bool = False,
 ) -> str:
     """
     Gera um token criptográfico assinado HMAC-SHA256 (compatível com padrão JWT HS256).
@@ -138,6 +141,7 @@ def generate_sosp_token(
         "cpf": cpf,
         "name": full_name,
         "email": email,
+        "must_change_password": bool(must_change_password),
         "iat": now,
         "exp": now + expires_in_seconds,
         "jti": uuid.uuid4().hex,
@@ -219,6 +223,13 @@ class SospTokenAuthentication(BaseAuthentication):
         agency_id = payload.get("agency_id")
         unit_id = payload.get("unit_id")
 
+        # Fail-closed: usuários institucionais com claim ausente ou nula exigem troca de senha por padrão
+        token_must_change = payload.get("must_change_password")
+        if role in ("server", "servant", "servidor", "gestor", "manager", "admin", "administrator", "superadmin", "administrador"):
+            initial_must_change = True if token_must_change is None else bool(token_must_change)
+        else:
+            initial_must_change = False if token_must_change is None else bool(token_must_change)
+
         user = SospUser(
             user_id=user_id,
             role=role,
@@ -228,6 +239,7 @@ class SospTokenAuthentication(BaseAuthentication):
             full_name=payload.get("name", ""),
             email=payload.get("email", ""),
             is_active=True,
+            must_change_password=initial_must_change,
         )
 
         # 1. Estabelece contexto RLS com falha segura no backend persistente.
@@ -280,6 +292,8 @@ class SospTokenAuthentication(BaseAuthentication):
                 return "gestor"
             if value in ("citizen", "cidadao"):
                 return "citizen"
+            if value in ("admin", "superadmin", "administrator", "administrador"):
+                return "admin"
             return value
 
         try:
@@ -295,10 +309,20 @@ class SospTokenAuthentication(BaseAuthentication):
                         raise AuthenticationFailed("Conta desativada, excluída ou inexistente.")
                 elif token_role in ("server", "gestor", "admin", "superadmin"):
                     current = InternalUser.objects.filter(id=user_id).values(
-                        "role", "agency_id", "unit_id", "is_active", "deleted_at"
+                        "role", "agency_id", "unit_id", "is_active", "deleted_at", "must_change_password"
                     ).first()
                     if not current or not current["is_active"] or current["deleted_at"] is not None:
                         raise AuthenticationFailed("Conta institucional desativada, excluída ou inexistente.")
+
+                    raw_must_change = current.get("must_change_password")
+                    authoritative_must_change = True if raw_must_change is None else bool(raw_must_change)
+                    user.must_change_password = authoritative_must_change
+
+                    # Anti-bypass: se o token afirma false mas o banco autoritativo exige troca, rejeita imediatamente
+                    if payload.get("must_change_password") is False and authoritative_must_change:
+                        raise AuthenticationFailed(
+                            "Token inválido: tentativa de bypass de primeiro acesso. Troca de senha obrigatória pendente."
+                        )
 
                     if (
                         canonical_role(current["role"]) != token_role
@@ -312,11 +336,25 @@ class SospTokenAuthentication(BaseAuthentication):
                     raise AuthenticationFailed("Perfil de autenticação inválido.")
             else:
                 from apps.accounts.repositories import citizen_repository
-                subject = citizen_repository.get_by_id(str(user_id))
-                if subject and (
-                    not subject.get("isActive", True) or subject.get("deletedAt")
-                ):
-                    raise AuthenticationFailed("Conta desativada ou excluída.")
+                token_role = canonical_role(role)
+                subject = citizen_repository.get_internal_user_by_id(str(user_id)) if token_role in ("server", "gestor", "admin", "superadmin") else citizen_repository.get_by_id(str(user_id))
+                if subject:
+                    if not subject.get("isActive", True) or subject.get("deletedAt"):
+                        raise AuthenticationFailed("Conta desativada ou excluída.")
+                    if token_role in ("server", "gestor", "admin", "superadmin"):
+                        raw_must_change = subject.get("mustChangePassword")
+                        authoritative_must_change = True if raw_must_change is None else bool(raw_must_change)
+                        user.must_change_password = authoritative_must_change
+                        if payload.get("must_change_password") is False and authoritative_must_change:
+                            raise AuthenticationFailed(
+                                "Token inválido: tentativa de bypass de primeiro acesso. Troca de senha obrigatória pendente."
+                            )
+                        if (
+                            canonical_role(subject.get("role", "")) != token_role
+                            or str(subject.get("agencyId") or "") != str(agency_id or "")
+                            or str(subject.get("unitId") or "") != str(unit_id or "")
+                        ):
+                            raise AuthenticationFailed("Permissões institucionais alteradas. Faça login novamente.")
         except AuthenticationFailed:
             clear_db_security_context()
             raise

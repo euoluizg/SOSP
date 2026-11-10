@@ -5,6 +5,7 @@ from .views import (
     LogoutView,
     PasswordRecoveryView,
     PasswordResetView,
+    ChangePasswordView,
 )
 
 urlpatterns = [
@@ -13,4 +14,5 @@ urlpatterns = [
     re_path(r"^logout/?$", LogoutView.as_view(), name="auth-logout"),
     re_path(r"^recover-password/?$", PasswordRecoveryView.as_view(), name="auth-recover-password"),
     re_path(r"^reset-password/?$", PasswordResetView.as_view(), name="auth-reset-password"),
+    re_path(r"^change-password/?$", ChangePasswordView.as_view(), name="auth-change-password"),
 ]

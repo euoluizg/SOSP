@@ -29,13 +29,14 @@ def _request(role="server", agency_id=AGENCY_ID, unit_id=UNIT_ID):
     return APIRequestFactory().get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
 
 
-def _current(role="servant", active=True, deleted=None, agency_id=AGENCY_ID, unit_id=UNIT_ID):
+def _current(role="servant", active=True, deleted=None, agency_id=AGENCY_ID, unit_id=UNIT_ID, must_change=False):
     return {
         "role": role,
         "agency_id": agency_id,
         "unit_id": unit_id,
         "is_active": active,
         "deleted_at": deleted,
+        "must_change_password": must_change,
     }
 
 

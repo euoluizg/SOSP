@@ -2,6 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from common.security.permissions import HasChangedTemporaryPassword, IsServerUser
 from .serializers import CreateAppointmentSerializer, CancelAppointmentSerializer
 from .services import SchedulingService
 from .repositories import scheduling_repository
@@ -103,7 +104,7 @@ class UnitSlotsView(APIView):
 
 
 class AppointmentCreateListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def post(self, request):
         idempotency_key = request.headers.get("Idempotency-Key") or request.META.get(
@@ -141,7 +142,7 @@ class AppointmentCreateListView(APIView):
 
 
 class AppointmentDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def get(self, request, appointment_id):
         appt = scheduling_repository.get_by_id(appointment_id)
@@ -152,7 +153,7 @@ class AppointmentDetailView(APIView):
 
 
 class AppointmentCancelView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def post(self, request, appointment_id):
         appt = scheduling_repository.get_by_id(appointment_id)
@@ -171,7 +172,7 @@ class AppointmentCancelView(APIView):
 
 
 class AppointmentByProtocolView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def get(self, request, protocol_number):
         appt = scheduling_repository.get_by_protocol(protocol_number)
@@ -182,7 +183,7 @@ class AppointmentByProtocolView(APIView):
 
 
 class CitizenAppointmentsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def get(self, request, citizen_id):
         user_role = getattr(request.user, "role", "citizen")
@@ -245,7 +246,7 @@ class CitizenAppointmentsView(APIView):
 
 
 class ProtocolTimelineView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def get(self, request, protocol_number):
         appt = scheduling_repository.get_by_protocol(protocol_number)
@@ -262,7 +263,7 @@ class ProtocolDirectView(APIView):
     O endpoint de consulta oficial é /appointments/by-protocol/{protocol} ou /protocols/{protocolNumber}/timeline.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def get(self, request, protocol_number):
         raise ProblemDetailsException(
@@ -284,7 +285,7 @@ class ProtocolDirectView(APIView):
 
 
 class ProtocolDocumentsUploadView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
     def post(self, request, protocol_number):
         appt = scheduling_repository.get_by_protocol(protocol_number)

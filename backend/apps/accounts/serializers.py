@@ -56,3 +56,14 @@ class PasswordResetSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=6)
     newPassword = serializers.CharField(write_only=True)
 
+class ChangePasswordSerializer(serializers.Serializer):
+    currentPassword = serializers.CharField(write_only=True)
+    newPassword = serializers.CharField(write_only=True)
+    confirmPassword = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        confirm = attrs.get("confirmPassword")
+        if confirm and attrs.get("newPassword") != confirm:
+            raise serializers.ValidationError({"confirmPassword": "A confirmação de senha não coincide com a nova senha."})
+        return attrs
+

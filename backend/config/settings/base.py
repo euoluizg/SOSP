@@ -198,11 +198,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "common.security.authentication.SospTokenAuthentication",
     ],
-    # Política deny-by-default (RF-01/RF-02/RN-28): toda view exige autenticação.
+    # Política deny-by-default (RF-01/RF-02/RN-28): toda view exige autenticação e senha permanente.
     # Endpoints públicos (health, login, cadastro, recuperação de senha, catálogo,
     # slots e FAQ) declaram AllowAny explicitamente em permission_classes.
+    # Endpoints de troca de primeiro acesso (change-password) declaram IsAuthenticated explicitamente.
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+        "common.security.permissions.HasChangedTemporaryPassword",
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",

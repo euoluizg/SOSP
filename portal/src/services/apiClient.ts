@@ -1,4 +1,4 @@
-import { Agency, Appointment, AppointmentSlot, CitizenProfile, ProblemDetails, Protocol, Service, Unit } from "@/types/api";
+import { Agency, Appointment, AppointmentSlot, CitizenProfile, LoginResponse, ProblemDetails, Protocol, Service, Unit, UserSession } from "@/types/api";
 import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
@@ -271,18 +271,7 @@ export class ApiClient {
     });
   }
 
-  static async login(cpf: string, password: string): Promise<{
-    token: string;
-    tokenType: string;
-    expiresIn: number;
-    citizen: {
-      id: string;
-      fullName: string;
-      cpf: string;
-      email: string;
-      role: string;
-    };
-  }> {
+  static async login(cpf: string, password: string): Promise<LoginResponse> {
     if (USE_MOCK) {
       await new Promise((r) => setTimeout(r, 300));
       if (password === "erro") {
@@ -303,23 +292,32 @@ export class ApiClient {
           cpf: cpf.replace(/\D/g, ""),
           email: "cidadao@exemplo.com.br",
           role: "citizen",
+          mustChangePassword: false,
         },
       };
     }
-    const res = await this.request<{
-      token: string;
-      tokenType: string;
-      expiresIn: number;
-      citizen: {
-        id: string;
-        fullName: string;
-        cpf: string;
-        email: string;
-        role: string;
-      };
-    }>("/auth/login", {
+    const res = await this.request<LoginResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ cpf, password }),
+    });
+    if (typeof window !== "undefined" && res.token) {
+      localStorage.setItem("sosp_auth_token", res.token);
+    }
+    return res;
+  }
+
+  static async changePassword(
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword?: string
+  ): Promise<{ message: string; token?: string; mustChangePassword?: boolean }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 200));
+      return { message: "Senha alterada com sucesso.", mustChangePassword: false };
+    }
+    const res = await this.request<{ message: string; token?: string; mustChangePassword?: boolean }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
     });
     if (typeof window !== "undefined" && res.token) {
       localStorage.setItem("sosp_auth_token", res.token);
@@ -456,6 +454,7 @@ export const logout = ApiClient.logout.bind(ApiClient);
 export const isAuthenticated = ApiClient.isAuthenticated.bind(ApiClient);
 export const recoverPassword = ApiClient.recoverPassword.bind(ApiClient);
 export const resetPassword = ApiClient.resetPassword.bind(ApiClient);
+export const changePassword = ApiClient.changePassword.bind(ApiClient);
 export const getCitizenMe = ApiClient.getCitizenMe.bind(ApiClient);
 export const getFaqs = ApiClient.getFaqs.bind(ApiClient);
 export const openQuestion = ApiClient.openQuestion.bind(ApiClient);

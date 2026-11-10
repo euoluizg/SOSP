@@ -7,6 +7,7 @@ from .serializers import (
     CitizenLoginSerializer,
     PasswordRecoveryRequestSerializer,
     PasswordResetSerializer,
+    ChangePasswordSerializer,
 )
 from .services import AccountService
 from .repositories import citizen_repository
@@ -63,6 +64,20 @@ class PasswordResetView(APIView):
             cpf=serializer.validated_data["cpf"],
             code=serializer.validated_data["code"],
             new_password=serializer.validated_data["newPassword"],
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.change_password(
+            user=request.user,
+            current_password=serializer.validated_data["currentPassword"],
+            new_password=serializer.validated_data["newPassword"],
+            confirm_password=serializer.validated_data.get("confirmPassword"),
         )
         return Response(result, status=status.HTTP_200_OK)
 

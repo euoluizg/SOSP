@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import secrets
+import sys
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
@@ -14,6 +15,46 @@ if not DEFAULT_DEMO_CREDENTIAL:
 def get_demo_password() -> str:
     """Retorna a credencial temporária isolada para testes e demonstração local."""
     return DEFAULT_DEMO_CREDENTIAL
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def _safe_atomic_block():
+    """Cria savepoint e preserva rollback; aceita mocks sem banco configurado."""
+    try:
+        from django.db import transaction
+        sp = transaction.atomic()
+        sp.__enter__()
+    except RuntimeError as exc:
+        if not getattr(settings, "TESTING", False) or "Database access not allowed" not in str(exc):
+            raise
+        yield
+        return
+    try:
+        yield
+    except BaseException:
+        sp.__exit__(*sys.exc_info())
+        raise
+    else:
+        sp.__exit__(None, None, None)
+
+
+def _postgres_sqlstate(exc: Exception) -> Optional[str]:
+    """Recupera SQLSTATE também quando Django encapsula a exceção do driver."""
+    while exc is not None:
+        code = getattr(exc, "sqlstate", None) or getattr(exc, "pgcode", None)
+        if code:
+            return code
+        exc = getattr(exc, "__cause__", None)
+    return None
+
+
+class FunctionNotFoundError(Exception):
+    """Lançada quando uma função sosp_security não existe no schema PostgreSQL."""
+    pass
+
 
 class CitizenInMemoryRepository:
     """Repositório em memória para Cidadãos e Usuários (sem banco nesta fase)."""
@@ -83,6 +124,7 @@ class CitizenInMemoryRepository:
                 "role": "server",
                 "agencyId": "orgao-ssp",
                 "unitId": "unidade-centro",
+                "mustChangePassword": False,
                 "isActive": True,
                 "createdAt": "2026-11-01T10:00:00Z",
             },
@@ -99,6 +141,7 @@ class CitizenInMemoryRepository:
                 "role": "server",
                 "agencyId": "orgao-detran",
                 "unitId": "unidade-farol",
+                "mustChangePassword": False,
                 "isActive": True,
                 "createdAt": "2026-11-01T10:00:00Z",
             },
@@ -114,6 +157,7 @@ class CitizenInMemoryRepository:
                 "passwordHash": hashed_password,
                 "role": "gestor",
                 "agencyId": "orgao-ssp",
+                "mustChangePassword": False,
                 "isActive": True,
                 "createdAt": "2026-11-01T10:00:00Z",
             },
@@ -128,6 +172,7 @@ class CitizenInMemoryRepository:
                 "phone": "82994445566",
                 "passwordHash": hashed_password,
                 "role": "superadmin",
+                "mustChangePassword": False,
                 "isActive": True,
                 "createdAt": "2026-11-01T10:00:00Z",
             },
@@ -141,6 +186,15 @@ class CitizenInMemoryRepository:
     def get_by_id(self, citizen_id: str) -> Optional[Dict[str, Any]]:
         return self._citizens.get(citizen_id)
 
+    def get_internal_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        for u in self._citizens.values():
+            if str(u.get("id")) == str(user_id) and u.get("role") in ("server", "servant", "gestor", "manager", "admin", "superadmin"):
+                res = dict(u)
+                must_change = res.get("mustChangePassword", True)
+                res["mustChangePassword"] = True if must_change is None else bool(must_change)
+                return res
+        return None
+
     def get_by_cpf(self, cpf: str) -> Optional[Dict[str, Any]]:
         clean_cpf = "".join(filter(str.isdigit, cpf))
         if clean_cpf == "11144477705":
@@ -150,8 +204,32 @@ class CitizenInMemoryRepository:
                 return c
         return None
 
+    def get_citizen_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        if clean_cpf == "11144477705":
+            clean_cpf = "11144477735"
+        for c in self._citizens.values():
+            if c.get("cpf") == clean_cpf and c.get("role") == "citizen":
+                res = dict(c)
+                res["mustChangePassword"] = False
+                return res
+        return None
+
+    def get_internal_user_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        for u in self._citizens.values():
+            if u.get("cpf") == clean_cpf and u.get("role") in ("server", "servant", "gestor", "manager", "admin", "superadmin"):
+                res = dict(u)
+                must_change = res.get("mustChangePassword", True)
+                res["mustChangePassword"] = True if must_change is None else bool(must_change)
+                return res
+        return None
+
     def get_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
-        return self.get_by_cpf(cpf)
+        cit = self.get_citizen_by_cpf_for_auth(cpf)
+        if cit:
+            return cit
+        return self.get_internal_user_by_cpf_for_auth(cpf)
 
     def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         clean_email = email.strip().lower()
@@ -300,6 +378,15 @@ class CitizenInMemoryRepository:
                 count += 1
         return count
 
+    def change_internal_user_password(self, user_id: str, new_password_hash: str) -> bool:
+        for u in self._citizens.values():
+            if str(u.get("id")) == str(user_id):
+                u["passwordHash"] = new_password_hash
+                u["mustChangePassword"] = False
+                self.revoke_all_sessions(str(user_id))
+                return True
+        return False
+
 class CitizenDjangoORMRepository:
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
 
@@ -314,16 +401,200 @@ class CitizenDjangoORMRepository:
         c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
         return self._to_dict(c) if c else None
 
+    def get_internal_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        from .models import InternalUser
+        u = InternalUser.objects.filter(id=user_id, is_active=True, deleted_at__isnull=True).first()
+        if not u:
+            return None
+        role = u.role
+        if role in ("servant", "server"):
+            role = "server"
+        elif role in ("manager", "gestor"):
+            role = "gestor"
+        must_change = getattr(u, "must_change_password", None)
+        must_change_val = True if must_change is None else bool(must_change)
+        return {
+            "id": str(u.id),
+            "fullName": u.full_name,
+            "cpf": u.cpf,
+            "email": u.email,
+            "registrationNumber": u.registration_number,
+            "role": role,
+            "agencyId": str(u.agency_id) if u.agency_id else None,
+            "unitId": str(u.unit_id) if u.unit_id else None,
+            "canManageCatalog": u.can_manage_catalog,
+            "passwordHash": u.password_hash,
+            "isActive": u.is_active,
+            "mustChangePassword": must_change_val,
+        }
+
+    def get_citizen_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        """
+        Busca cidadão por CPF exclusivamente para autenticação sob RLS.
+        Em PostgreSQL: invoca sosp_security.authenticate_citizen_by_cpf em transação atômica isolada.
+        Se a função não existir (42883), lança FunctionNotFoundError sem abortar a transação chamadora.
+        """
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        if len(clean_cpf) != 11:
+            return None
+
+        from django.db import connection
+        if connection.vendor == "postgresql":
+            try:
+                with _safe_atomic_block():
+                    with connection.cursor() as cur:
+                        cur.execute(
+                            "SELECT citizen_id, full_name, email, password_hash, is_active, blocked_until, login_attempts, role "
+                            "FROM sosp_security.authenticate_citizen_by_cpf(%s);",
+                            [clean_cpf]
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            return {
+                                "id": str(row[0]),
+                                "fullName": row[1],
+                                "cpf": clean_cpf,
+                                "email": row[2],
+                                "passwordHash": row[3],
+                                "isActive": row[4],
+                                "blockedUntil": row[5].isoformat() if row[5] else None,
+                                "loginAttempts": row[6] or 0,
+                                "role": row[7] or "citizen",
+                                "mustChangePassword": False,
+                            }
+                        return None
+            except Exception as e:
+                if _postgres_sqlstate(e) == "42883":
+                    raise FunctionNotFoundError("Função sosp_security.authenticate_citizen_by_cpf não encontrada.") from e
+                raise
+        else:
+            from .models import Citizen
+            c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).only(
+                "id", "cpf", "full_name", "email", "password_hash", "is_active", "blocked_until", "login_attempts"
+            ).first()
+            if c:
+                res = self._to_dict(c)
+                res["mustChangePassword"] = False
+                return res
+            return None
+
+    def get_internal_user_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
+        """
+        Busca usuário interno (servidores, gestores e administradores) por CPF sob RLS.
+        Em PostgreSQL: invoca sosp_security.authenticate_internal_user_by_cpf em transação atômica isolada.
+        Fail-closed de troca obrigatória de senha: caso a 11ª coluna (must_change_password) esteja ausente ou nula,
+        força estritamente mustChangePassword=True.
+        """
+        clean_cpf = "".join(filter(str.isdigit, cpf))
+        if len(clean_cpf) != 11:
+            return None
+
+        from django.db import connection
+        if connection.vendor == "postgresql":
+            try:
+                with _safe_atomic_block():
+                    with connection.cursor() as cur:
+                        irow = None
+                        try:
+                            with _safe_atomic_block():
+                                cur.execute(
+                                    "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active, must_change_password "
+                                    "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
+                                    [clean_cpf]
+                                )
+                                irow = cur.fetchone()
+                        except Exception as inner_e:
+                            inner_code = _postgres_sqlstate(inner_e)
+                            if inner_code == "42883":
+                                raise FunctionNotFoundError("Função sosp_security.authenticate_internal_user_by_cpf não encontrada.") from inner_e
+                            if inner_code != "42703" or "must_change_password" not in str(inner_e).lower():
+                                raise
+                            # Fallback apenas quando a assinatura antiga não contém a 11ª coluna.
+                            with _safe_atomic_block():
+                                cur.execute(
+                                    "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
+                                    "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
+                                    [clean_cpf]
+                                )
+                                irow = cur.fetchone()
+
+                        if irow:
+                            role = irow[6]
+                            if role in ("servant", "server"):
+                                role = "server"
+                            elif role in ("manager", "gestor"):
+                                role = "gestor"
+
+                            # Fail-closed rigoroso: ausente (< 11 colunas) ou None resulta em True
+                            if len(irow) > 10 and irow[10] is not None:
+                                must_change = bool(irow[10])
+                            else:
+                                must_change = True
+
+                            return {
+                                "id": str(irow[0]),
+                                "fullName": irow[1],
+                                "cpf": clean_cpf,
+                                "email": irow[2],
+                                "registrationNumber": irow[3],
+                                "agencyId": str(irow[4]) if irow[4] else None,
+                                "unitId": str(irow[5]) if irow[5] else None,
+                                "role": role,
+                                "canManageCatalog": irow[7],
+                                "passwordHash": irow[8],
+                                "isActive": irow[9],
+                                "blockedUntil": None,
+                                "loginAttempts": 0,
+                                "mustChangePassword": must_change,
+                            }
+                        return None
+            except FunctionNotFoundError:
+                raise
+            except Exception as e:
+                if _postgres_sqlstate(e) == "42883":
+                    raise FunctionNotFoundError("Função sosp_security.authenticate_internal_user_by_cpf não encontrada.") from e
+                raise
+        else:
+            from .models import InternalUser
+            u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
+            if u:
+                role = u.role
+                if role in ("servant", "server"):
+                    role = "server"
+                elif role in ("manager", "gestor"):
+                    role = "gestor"
+
+                must_change = getattr(u, "must_change_password", None)
+                must_change_val = True if must_change is None else bool(must_change)
+
+                return {
+                    "id": str(u.id),
+                    "fullName": u.full_name,
+                    "cpf": clean_cpf,
+                    "email": u.email,
+                    "registrationNumber": u.registration_number,
+                    "role": role,
+                    "agencyId": str(u.agency_id) if u.agency_id else None,
+                    "unitId": str(u.unit_id) if u.unit_id else None,
+                    "canManageCatalog": u.can_manage_catalog,
+                    "passwordHash": u.password_hash,
+                    "isActive": u.is_active,
+                    "blockedUntil": None,
+                    "loginAttempts": 0,
+                    "mustChangePassword": must_change_val,
+                }
+            return None
+
     def get_by_cpf_for_auth(self, cpf: str) -> Optional[Dict[str, Any]]:
         """
-        Busca cidadão por CPF exclusivamente para autenticação sob RLS com princípio do menor privilégio.
-        1. Em PostgreSQL: Invoca exclusivamente a função cirúrgica sosp_security.authenticate_citizen_by_cpf (sem elevação de role).
-           PROIBIDO: Fallback silencioso para role 'server' ou 'admin'. Se a função estiver ausente, falha com 503 seguro.
-        2. Em SQLite (testes locais rápidos sem RLS): Consulta direta via ORM.
+        Coordena a autenticação desacoplada sob RLS:
+        1. Consulta cidadão via get_citizen_by_cpf_for_auth (com savepoint atômico).
+        2. Se cidadão for encontrado, retorna-o.
+        3. Se não for cidadão, consulta usuário interno via get_internal_user_by_cpf_for_auth (com savepoint atômico).
+        4. Desacoplamento seguro: se a função de cidadão não existir, a consulta interna prossegue normalmente.
+        5. Se ambas as funções estiverem ausentes no PostgreSQL, falha de forma segura com 503 ProblemDetails.
         """
         import logging
-        from .models import Citizen
-        from django.db import connection
         from common.exceptions import ProblemDetailsException
 
         logger = logging.getLogger(__name__)
@@ -332,103 +603,58 @@ class CitizenDjangoORMRepository:
         if len(clean_cpf) != 11:
             return None
 
-        # 1. Em PostgreSQL: Exclusivamente via funções SECURITY DEFINER de menor privilégio sob RLS
-        if connection.vendor == "postgresql":
-            try:
-                with connection.cursor() as cur:
-                    # 1.1 Consulta cidadão via função cirúrgica (LIMIT 1)
-                    cur.execute(
-                        "SELECT citizen_id, full_name, email, password_hash, is_active, blocked_until, login_attempts, role "
-                        "FROM sosp_security.authenticate_citizen_by_cpf(%s);",
-                        [clean_cpf]
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        return {
-                            "id": str(row[0]),
-                            "fullName": row[1],
-                            "cpf": clean_cpf,
-                            "email": row[2],
-                            "passwordHash": row[3],
-                            "isActive": row[4],
-                            "blockedUntil": row[5].isoformat() if row[5] else None,
-                            "loginAttempts": row[6] or 0,
-                            "role": row[7] or "citizen",
-                        }
+        citizen_fn_missing = False
+        internal_fn_missing = False
 
-                    # 1.2 Consulta usuário interno (servidores, gestores e administradores) via função cirúrgica sob RLS
-                    cur.execute(
-                        "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
-                        "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
-                        [clean_cpf]
-                    )
-                    irow = cur.fetchone()
-                    if irow:
-                        role = irow[6]
-                        if role in ("servant", "server"):
-                            role = "server"
-                        elif role in ("manager", "gestor"):
-                            role = "gestor"
+        # 1. Tenta autenticação de Cidadão
+        try:
+            cit = self.get_citizen_by_cpf_for_auth(clean_cpf)
+            if cit:
+                return cit
+        except FunctionNotFoundError:
+            logger.warning("Função sosp_security.authenticate_citizen_by_cpf ausente no banco.")
+            citizen_fn_missing = True
+        except Exception as e:
+            logger.error("Erro inesperado na consulta de autenticação de cidadão: %s", e)
+            raise ProblemDetailsException(
+                detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
+                title="Serviço Indisponível",
+                status_code=503,
+            )
 
-                        return {
-                            "id": str(irow[0]),
-                            "fullName": irow[1],
-                            "cpf": clean_cpf,
-                            "email": irow[2],
-                            "registrationNumber": irow[3],
-                            "agencyId": str(irow[4]) if irow[4] else None,
-                            "unitId": str(irow[5]) if irow[5] else None,
-                            "role": role,
-                            "canManageCatalog": irow[7],
-                            "passwordHash": irow[8],
-                            "isActive": irow[9],
-                            "blockedUntil": None,
-                            "loginAttempts": 0,
-                        }
-                    return None
-            except Exception as e:
-                logger.error(
-                    "FALHA DE SEGURANÇA: Funções sosp_security de autenticação inacessíveis no PostgreSQL: %s. "
-                    "Fallback privilegiado (role='server') está PERMANENTEMENTE DESATIVADO por política de menor privilégio.",
-                    e
-                )
-                raise ProblemDetailsException(
-                    detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
-                    title="Serviço Indisponível",
-                    status_code=503,
-                )
+        # 2. Tenta autenticação de Usuário Interno
+        try:
+            internal_user = self.get_internal_user_by_cpf_for_auth(clean_cpf)
+            if internal_user:
+                return internal_user
+        except FunctionNotFoundError:
+            logger.warning("Função sosp_security.authenticate_internal_user_by_cpf ausente no banco.")
+            internal_fn_missing = True
+        except Exception as e:
+            logger.error("Erro inesperado na consulta de autenticação interna: %s", e)
+            raise ProblemDetailsException(
+                detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
+                title="Serviço Indisponível",
+                status_code=503,
+            )
 
-        # 2. Em SQLite ou fallback ORM (busca Citizen ou InternalUser)
-        from .models import Citizen, InternalUser
-        c = Citizen.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).only(
-            "id", "cpf", "full_name", "email", "password_hash", "is_active", "blocked_until", "login_attempts"
-        ).first()
-        if c:
-            return self._to_dict(c)
+        # 3. Se a função de cidadão estiver ausente e o usuário não for interno, 503 controlado
+        if citizen_fn_missing:
+            logger.error("FALHA DE SEGURANÇA: Função sosp_security.authenticate_citizen_by_cpf indisponível.")
+            raise ProblemDetailsException(
+                detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
+                title="Serviço Indisponível",
+                status_code=503,
+            )
 
-        # 3. Busca por Usuário Interno (servidores, gestores, administradores)
-        u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True, deleted_at__isnull=True).first()
-        if u:
-            role = u.role
-            if role in ("servant", "server"):
-                role = "server"
-            elif role in ("manager", "gestor"):
-                role = "gestor"
-
-            return {
-                "id": str(u.id),
-                "fullName": u.full_name,
-                "cpf": clean_cpf,
-                "email": u.email,
-                "passwordHash": u.password_hash,
-                "isActive": u.is_active,
-                "blockedUntil": None,
-                "loginAttempts": 0,
-                "role": role,
-                "agencyId": str(u.agency_id) if u.agency_id else None,
-                "unitId": str(u.unit_id) if u.unit_id else None,
-                "canManageCatalog": u.can_manage_catalog,
-            }
+        # 4. Se a função de usuário interno estiver ausente e o usuário não for cidadão, 503 controlado
+        if internal_fn_missing:
+            logger.error("FALHA DE SEGURANÇA: Função sosp_security.authenticate_internal_user_by_cpf indisponível.")
+            raise ProblemDetailsException(
+                detail="Serviço de autenticação temporariamente indisponível. Contate o suporte técnico.",
+                title="Serviço Indisponível",
+                status_code=503,
+            )
 
         return None
 
@@ -614,6 +840,19 @@ class CitizenDjangoORMRepository:
         u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
         if u:
             return bool(InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(password_hash=password_hash))
+        return False
+
+    def change_internal_user_password(self, user_id: str, new_password_hash: str) -> bool:
+        from .models import InternalUser
+        from django.utils import timezone
+        updated = InternalUser.objects.filter(id=user_id, is_active=True, deleted_at__isnull=True).update(
+            password_hash=new_password_hash,
+            must_change_password=False,
+            updated_at=timezone.now(),
+        )
+        if updated:
+            self.revoke_all_sessions(str(user_id))
+            return True
         return False
 
     def set_recovery_code(self, cpf: str, code: str) -> None:
