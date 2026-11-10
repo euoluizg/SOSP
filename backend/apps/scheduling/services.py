@@ -123,8 +123,8 @@ class SchedulingService:
             "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
 
-        scheduling_repository.save(appointment)
-        return appointment
+        saved = scheduling_repository.save(appointment)
+        return saved if saved else appointment
 
     @staticmethod
     def cancel_appointment(appointment_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -154,7 +154,8 @@ class SchedulingService:
         appt["status"] = "cancelled"
         appt["cancelReason"] = reason or "Cancelado pelo cidadão"
         appt["cancelledAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return appt
+        saved = scheduling_repository.save(appt)
+        return saved if saved else appt
 
     @staticmethod
     def get_protocol_timeline(protocol_number: str) -> Dict[str, Any]:

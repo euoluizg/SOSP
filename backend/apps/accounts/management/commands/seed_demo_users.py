@@ -5,7 +5,15 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.hashers import make_password
 from apps.accounts.models import Citizen, InternalUser, Gender
-from apps.catalog.models import Agency, Unit
+from apps.catalog.models import (
+    Agency,
+    Unit,
+    Service,
+    ServiceAgency,
+    UnitService,
+    ServiceStep,
+    ServiceDocument,
+)
 
 class Command(BaseCommand):
     help = "Cria ou atualiza com idempotência os usuários sintéticos de demonstração do SOSP (cidadãos, servidores e gestores)."
@@ -151,6 +159,21 @@ class Command(BaseCommand):
                 is_active=True,
             )
 
+        unit_ssp_interior = Unit.objects.filter(agency=agency_ssp, name__icontains="Interior", is_active=True).first()
+        if not unit_ssp_interior:
+            unit_ssp_interior = Unit.objects.create(
+                agency=agency_ssp,
+                name="Posto Interior SSP (Arapiraca)",
+                zip_code="57300000",
+                street="Rua Esperança",
+                neighborhood="Brasília",
+                city="Arapiraca",
+                state="AL",
+                address_number="789",
+                daily_limit=30,
+                is_active=True,
+            )
+
         unit_detran_farol = Unit.objects.filter(agency=agency_detran, name__icontains="Farol", is_active=True).first()
         if not unit_detran_farol:
             unit_detran_farol = Unit.objects.create(
@@ -227,6 +250,68 @@ class Command(BaseCommand):
             )
             action = "Criado" if created else "Atualizado"
             self.stdout.write(self.style.SUCCESS(f"  [Interno] {action}: {u.full_name} (Role: {u.role})"))
+
+        # 5. Serviços Demonstrativos do Catálogo SOSP (RF-04, RF-05, RF-06, RF-08)
+        cin_service = Service.objects.filter(name__icontains="Identidade Nacional").first()
+        if not cin_service:
+            cin_service = Service.objects.create(
+                name="Emitir Carteira de Identidade Nacional (CIN)",
+                category="documents",
+                detailed_description="A Carteira de Identidade Nacional (CIN) adota o CPF como número único de identificação em todo o território nacional. Possui versões física em papel de segurança e digital via aplicativo Gov.br.",
+                eligibility="Cidadãos brasileiros natos ou naturalizados residentes em Alagoas.",
+                prerequisites="Possuir CPF regularizado na Receita Federal e Certidão de Nascimento ou Casamento atualizada.",
+                is_free=True,
+                channel="inPerson",
+                status="active",
+                current_version=1,
+            )
+            ServiceAgency.objects.get_or_create(service=cin_service, agency=agency_ssp)
+            UnitService.objects.get_or_create(unit=unit_ssp_centro, service=cin_service, defaults={"is_active": True})
+            UnitService.objects.get_or_create(unit=unit_ssp_interior, service=cin_service, defaults={"is_active": True})
+
+            ServiceStep.objects.bulk_create([
+                ServiceStep(service=cin_service, step_order=1, title="Agendamento Prévio", description="Agende seu dia e horário no portal SOSP ou compareça a uma Central Já!."),
+                ServiceStep(service=cin_service, step_order=2, title="Separação dos Documentos", description="Confira o checklist e leve todos os documentos originais."),
+                ServiceStep(service=cin_service, step_order=3, title="Coleta Biométrica", description="Compareça com 15 minutos de antecedência para foto digital e digitais."),
+                ServiceStep(service=cin_service, step_order=4, title="Retirada do Documento", description="Retorne à unidade após o prazo informado para receber o documento."),
+            ])
+
+            ServiceDocument.objects.bulk_create([
+                ServiceDocument(service=cin_service, name="Certidão de Nascimento ou Casamento (Original)", is_mandatory=True),
+                ServiceDocument(service=cin_service, name="Comprovante de Residência Atualizado", is_mandatory=True),
+                ServiceDocument(service=cin_service, name="Comprovante de Pagamento da Taxa DARE", is_mandatory=False),
+            ])
+            self.stdout.write(self.style.SUCCESS(f"  [Catálogo] Criado: {cin_service.name}"))
+
+        cnh_service = Service.objects.filter(name__icontains="Habilitação").first()
+        if not cnh_service:
+            cnh_service = Service.objects.create(
+                name="Renovação da Carteira Nacional de Habilitação (CNH)",
+                category="transit",
+                detailed_description="Renovação periódica do documento de habilitação de condutores de veículos automotores em Alagoas.",
+                eligibility="Condutores habilitados com CNH vencida ou a vencer nos próximos 30 dias.",
+                prerequisites="Não possuir bloqueio judicial ou administrativo no prontuário.",
+                is_free=False,
+                cost_amount=110.00,
+                channel="hybrid",
+                status="active",
+                current_version=1,
+            )
+            ServiceAgency.objects.get_or_create(service=cnh_service, agency=agency_detran)
+            UnitService.objects.get_or_create(unit=unit_detran_farol, service=cnh_service, defaults={"is_active": True})
+
+            ServiceStep.objects.bulk_create([
+                ServiceStep(service=cnh_service, step_order=1, title="Abertura do Processo", description="Solicite a renovação no portal ou presencialmente."),
+                ServiceStep(service=cnh_service, step_order=2, title="Exame de Aptidão Física e Mental", description="Realize os exames na clínica credenciada indicada."),
+                ServiceStep(service=cnh_service, step_order=3, title="Pagamento da Taxa", description="Efetue o pagamento da guia DARE na rede bancária."),
+                ServiceStep(service=cnh_service, step_order=4, title="Emissão e Envio", description="Acompanhe a entrega pelos Correios ou retire na unidade."),
+            ])
+
+            ServiceDocument.objects.bulk_create([
+                ServiceDocument(service=cnh_service, name="CNH Anterior ou Documento Oficial de Identidade", is_mandatory=True),
+                ServiceDocument(service=cnh_service, name="Comprovante de Residência Atualizado", is_mandatory=True),
+            ])
+            self.stdout.write(self.style.SUCCESS(f"  [Catálogo] Criado: {cnh_service.name}"))
 
         self.stdout.write(self.style.SUCCESS("✓ Seed de usuários concluído com sucesso. Zero agendamentos criados."))
         if is_generated:

@@ -56,14 +56,21 @@ class AuditDjangoORMRepository:
         from .models import AuditEvent
         raw_actor_id = event_data.get("actor_id")
         actor_id = None
-        actor_type = "user"
+        actor_type = event_data.get("actor_type") or "servant"
         if raw_actor_id:
             if str(raw_actor_id).startswith("citizen-"):
                 actor_type = "citizen"
+            elif str(raw_actor_id) in ("system", "anonymous"):
+                actor_type = str(raw_actor_id)
             try:
                 actor_id = uuid.UUID(str(raw_actor_id))
             except Exception:
                 actor_id = None
+        elif actor_type not in ("citizen", "servant", "system", "anonymous"):
+            actor_type = "system"
+
+        if actor_type not in ("citizen", "servant", "system", "anonymous"):
+            actor_type = "servant"
 
         raw_target_id = event_data.get("target_id")
         entity_id = None
@@ -74,7 +81,8 @@ class AuditDjangoORMRepository:
                 entity_id = None
 
         detail = event_data.get("detail", "")
-        after_data = {"detail": detail} if detail else {}
+        after_data = event_data.get("after_state") or ({"detail": detail} if detail else {})
+        before_data = event_data.get("before_state")
 
         evt = AuditEvent.objects.create(
             actor_type=actor_type,
@@ -82,6 +90,7 @@ class AuditDjangoORMRepository:
             action=event_data.get("action", "UNKNOWN"),
             entity_type=event_data.get("target_table", "general"),
             entity_id=entity_id,
+            before_data=before_data,
             after_data=after_data,
             ip_address=event_data.get("ip_address", "127.0.0.1"),
         )

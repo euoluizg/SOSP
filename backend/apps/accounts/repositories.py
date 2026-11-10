@@ -233,7 +233,7 @@ class CitizenInMemoryRepository:
         clean_cpf = "".join(filter(str.isdigit, cpf))
         self._recovery_codes.pop(clean_cpf, None)
 
-    def update_password(self, cpf: str, password_hash: str) -> bool:
+    def update_password(self, cpf: str, password_hash: str, code: Optional[str] = None) -> bool:
         clean_cpf = "".join(filter(str.isdigit, cpf))
         for c in self._citizens.values():
             if c.get("cpf") == clean_cpf:
@@ -559,26 +559,86 @@ class CitizenDjangoORMRepository:
         # Zero DELETE físico (RN-40 e mínimo privilégio 4D.2)
         LoginAttempt.objects.filter(cpf=clean_cpf, was_successful=False).update(was_successful=True)
 
-    def update_password(self, cpf: str, password_hash: str) -> bool:
+    def update_password(self, cpf: str, password_hash: str, code: Optional[str] = None) -> bool:
         from .models import Citizen, InternalUser
+        from django.db import connection
+        from django.utils import timezone
+        from django.contrib.auth.hashers import check_password
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        updated = Citizen.objects.filter(cpf=clean_cpf, is_active=True).update(
-            password_hash=password_hash
-        )
-        if updated:
+
+        if connection.vendor == "postgresql":
+            if code:
+                try:
+                    with connection.cursor() as cur:
+                        cur.execute(
+                            "SELECT sosp_security.reset_citizen_password(%s, %s, %s);",
+                            [clean_cpf, str(code).strip(), password_hash]
+                        )
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            return True
+                except Exception:
+                    pass
+            # Em PostgreSQL, redefinição direta por CPF sem código válido é estritamente proibida
+            # para impedir bypass do fluxo de recuperação por usuários da role de runtime.
+            u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
+            if u:
+                return bool(InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(password_hash=password_hash))
+            return False
+
+        # Fallback ORM / SQLite: validação estrita de código e bloqueio
+        locked_out, _ = self.is_locked_out(clean_cpf)
+        if locked_out:
+            return False
+
+        c = Citizen.objects.filter(cpf=clean_cpf, is_active=True).first()
+        if c:
+            if not code or not c.recovery_code_hash:
+                return False
+            if c.recovery_code_expires_at and timezone.now() > c.recovery_code_expires_at:
+                self.clear_recovery_code(clean_cpf)
+                return False
+            if not check_password(str(code).strip(), c.recovery_code_hash):
+                attempts = self.record_failed_attempt(clean_cpf)
+                if attempts >= 5:
+                    self.clear_recovery_code(clean_cpf)
+                return False
+            # Sucesso: aplica senha e consome código
+            self.reset_failed_attempts(clean_cpf)
+            c.password_hash = password_hash
+            c.recovery_code_hash = None
+            c.recovery_code_expires_at = None
+            c.save(update_fields=["password_hash", "recovery_code_hash", "recovery_code_expires_at", "updated_at"])
             return True
-        updated_internal = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(
-            password_hash=password_hash
-        )
-        return bool(updated_internal)
+
+        u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
+        if u:
+            return bool(InternalUser.objects.filter(cpf=clean_cpf, is_active=True).update(password_hash=password_hash))
+        return False
 
     def set_recovery_code(self, cpf: str, code: str) -> None:
         from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
+        from django.db import connection
         clean_cpf = "".join(filter(str.isdigit, cpf))
+        clean_code = str(code).strip()
         exp = timezone.now() + datetime.timedelta(minutes=15)
+
+        if connection.vendor == "postgresql":
+            try:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        "SELECT sosp_security.set_citizen_recovery_code(%s, %s, %s);",
+                        [clean_cpf, clean_code, exp]
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        return
+            except Exception:
+                pass
+
         # Armazenamento criptográfico seguro do código verificador (não em texto puro)
-        code_verifier_hash = make_password(code)
+        code_verifier_hash = make_password(clean_code)
         updated = Citizen.objects.filter(cpf=clean_cpf, is_active=True).update(
             recovery_code_hash=code_verifier_hash,
             recovery_code_expires_at=exp
@@ -596,12 +656,27 @@ class CitizenDjangoORMRepository:
         from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
         from django.contrib.auth.hashers import check_password
+        from django.db import connection
         clean_cpf = "".join(filter(str.isdigit, cpf))
+        clean_code = str(code).strip()
 
         # Proteção contra força bruta: se estiver bloqueado temporariamente (RN-29), rejeita
         locked_out, _ = self.is_locked_out(clean_cpf)
         if locked_out:
             return False
+
+        if connection.vendor == "postgresql":
+            try:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        "SELECT sosp_security.verify_citizen_recovery_code(%s, %s);",
+                        [clean_cpf, clean_code]
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] is not None:
+                        return bool(row[0])
+            except Exception:
+                pass
 
         c = Citizen.objects.filter(cpf=clean_cpf, is_active=True).first()
         if c and c.recovery_code_hash:
@@ -609,7 +684,7 @@ class CitizenDjangoORMRepository:
                 self.clear_recovery_code(clean_cpf)
                 return False
 
-            is_valid = check_password(code, c.recovery_code_hash)
+            is_valid = check_password(clean_code, c.recovery_code_hash)
             if not is_valid:
                 attempts = self.record_failed_attempt(clean_cpf)
                 if attempts >= 5:
@@ -628,7 +703,7 @@ class CitizenDjangoORMRepository:
                     pr.save(update_fields=["used_at"])
                     return False
 
-                is_valid = check_password(code, pr.code_hash)
+                is_valid = check_password(clean_code, pr.code_hash)
                 if not is_valid:
                     attempts = self.record_failed_attempt(clean_cpf)
                     if attempts >= 5:
@@ -642,7 +717,19 @@ class CitizenDjangoORMRepository:
     def clear_recovery_code(self, cpf: str) -> None:
         from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
+        from django.db import connection
         clean_cpf = "".join(filter(str.isdigit, cpf))
+
+        if connection.vendor == "postgresql":
+            try:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        "SELECT sosp_security.clear_citizen_recovery_code(%s);",
+                        [clean_cpf]
+                    )
+            except Exception:
+                pass
+
         Citizen.objects.filter(cpf=clean_cpf).update(
             recovery_code_hash=None,
             recovery_code_expires_at=None

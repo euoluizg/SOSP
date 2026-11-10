@@ -118,10 +118,249 @@ $$;
 REVOKE ALL ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) TO sosp_runtime_role;
 
--- 4. Documentação no catálogo
+-- 4. Funções cirúrgicas de menor privilégio para recuperação de senha do cidadão (sob RLS)
+-- Remove explicitamente funções vulneráveis a bypass e vazamento de hashes
+DROP FUNCTION IF EXISTS sosp_security.get_citizen_recovery_code(VARCHAR);
+DROP FUNCTION IF EXISTS sosp_security.reset_citizen_password(VARCHAR, TEXT);
+
+CREATE OR REPLACE FUNCTION sosp_security.set_citizen_recovery_code(
+    p_cpf VARCHAR,
+    p_code VARCHAR,
+    p_expires_at TIMESTAMPTZ
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+        RETURN FALSE;
+    END IF;
+    IF p_code IS NULL OR p_code !~ '^[0-9]{6}$' THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Se já estiver bloqueado temporariamente por força bruta (RN-29), rejeita nova geração
+    IF EXISTS (
+        SELECT 1 FROM public.accountsCitizen
+        WHERE cpf = p_cpf AND blockedUntil IS NOT NULL AND blockedUntil > now()
+    ) THEN
+        RETURN FALSE;
+    END IF;
+
+    UPDATE public.accountsCitizen
+    SET recoveryCodeHash = crypt(p_code, gen_salt('bf', 8)),
+        recoveryCodeExpiresAt = p_expires_at,
+        updatedAt = now()
+    WHERE cpf = p_cpf
+      AND isActive = true
+      AND deletedAt IS NULL;
+
+    RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION sosp_security.set_citizen_recovery_code(VARCHAR, VARCHAR, TIMESTAMPTZ) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sosp_security.set_citizen_recovery_code(VARCHAR, VARCHAR, TIMESTAMPTZ) TO sosp_runtime_role;
+
+CREATE OR REPLACE FUNCTION sosp_security.verify_citizen_recovery_code(
+    p_cpf VARCHAR,
+    p_code VARCHAR
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_stored_hash TEXT;
+    v_expires_at TIMESTAMPTZ;
+    v_blocked_until TIMESTAMPTZ;
+    v_attempts INT;
+BEGIN
+    IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+        RETURN FALSE;
+    END IF;
+    IF p_code IS NULL OR p_code !~ '^[0-9]{6}$' THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT recoveryCodeHash, recoveryCodeExpiresAt, blockedUntil, loginAttempts
+    INTO v_stored_hash, v_expires_at, v_blocked_until, v_attempts
+    FROM public.accountsCitizen
+    WHERE cpf = p_cpf AND isActive = true AND deletedAt IS NULL
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 1. Verifica se a conta está bloqueada temporariamente (RN-29)
+    IF v_blocked_until IS NOT NULL AND v_blocked_until > now() THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 2. Verifica se o código expirou (RN-30: 15 minutos)
+    IF v_stored_hash IS NULL OR v_expires_at IS NULL OR now() > v_expires_at THEN
+        UPDATE public.accountsCitizen
+        SET recoveryCodeHash = NULL, recoveryCodeExpiresAt = NULL, updatedAt = now()
+        WHERE cpf = p_cpf;
+        RETURN FALSE;
+    END IF;
+
+    -- 3. Comparação criptográfica segura usando pgcrypto crypt
+    IF crypt(p_code, v_stored_hash) != v_stored_hash THEN
+        IF v_attempts + 1 >= 5 THEN
+            UPDATE public.accountsCitizen
+            SET loginAttempts = v_attempts + 1,
+                blockedUntil = now() + interval '5 minutes',
+                recoveryCodeHash = NULL,
+                recoveryCodeExpiresAt = NULL,
+                updatedAt = now()
+            WHERE cpf = p_cpf;
+        ELSE
+            UPDATE public.accountsCitizen
+            SET loginAttempts = v_attempts + 1,
+                updatedAt = now()
+            WHERE cpf = p_cpf;
+        END IF;
+        RETURN FALSE;
+    END IF;
+
+    -- Código válido: reseta tentativas
+    UPDATE public.accountsCitizen
+    SET loginAttempts = 0, updatedAt = now()
+    WHERE cpf = p_cpf;
+
+    RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION sosp_security.verify_citizen_recovery_code(VARCHAR, VARCHAR) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sosp_security.verify_citizen_recovery_code(VARCHAR, VARCHAR) TO sosp_runtime_role;
+
+CREATE OR REPLACE FUNCTION sosp_security.clear_citizen_recovery_code(p_cpf VARCHAR)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+        RETURN FALSE;
+    END IF;
+
+    UPDATE public.accountsCitizen
+    SET recoveryCodeHash = NULL,
+        recoveryCodeExpiresAt = NULL,
+        updatedAt = now()
+    WHERE cpf = p_cpf;
+
+    RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION sosp_security.clear_citizen_recovery_code(VARCHAR) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sosp_security.clear_citizen_recovery_code(VARCHAR) TO sosp_runtime_role;
+
+-- Redefinição segura de senha: EXIGE obrigatoriamente a verificação atômica do código de 6 dígitos.
+-- IMPEDE redefinição direta por CPF ou bypass do fluxo por usuários da role de runtime.
+CREATE OR REPLACE FUNCTION sosp_security.reset_citizen_password(
+    p_cpf VARCHAR,
+    p_code VARCHAR,
+    p_new_password_hash TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+    v_stored_hash TEXT;
+    v_expires_at TIMESTAMPTZ;
+    v_blocked_until TIMESTAMPTZ;
+    v_attempts INT;
+BEGIN
+    IF p_cpf IS NULL OR p_cpf !~ '^[0-9]{11}$' THEN
+        RETURN FALSE;
+    END IF;
+    IF p_code IS NULL OR p_code !~ '^[0-9]{6}$' THEN
+        RETURN FALSE;
+    END IF;
+    IF p_new_password_hash IS NULL OR length(p_new_password_hash) < 10 THEN
+        RETURN FALSE;
+    END IF;
+
+    SELECT recoveryCodeHash, recoveryCodeExpiresAt, blockedUntil, loginAttempts
+    INTO v_stored_hash, v_expires_at, v_blocked_until, v_attempts
+    FROM public.accountsCitizen
+    WHERE cpf = p_cpf AND isActive = true AND deletedAt IS NULL
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 1. Proteção de bloqueio temporário por tentativas falhas (RN-29)
+    IF v_blocked_until IS NOT NULL AND v_blocked_until > now() THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 2. Validação de expiração do código (RN-30: 15 min)
+    IF v_stored_hash IS NULL OR v_expires_at IS NULL OR now() > v_expires_at THEN
+        UPDATE public.accountsCitizen
+        SET recoveryCodeHash = NULL, recoveryCodeExpiresAt = NULL, updatedAt = now()
+        WHERE cpf = p_cpf;
+        RETURN FALSE;
+    END IF;
+
+    -- 3. Comparação criptográfica segura
+    IF crypt(p_code, v_stored_hash) != v_stored_hash THEN
+        IF v_attempts + 1 >= 5 THEN
+            UPDATE public.accountsCitizen
+            SET loginAttempts = v_attempts + 1,
+                blockedUntil = now() + interval '5 minutes',
+                recoveryCodeHash = NULL,
+                recoveryCodeExpiresAt = NULL,
+                updatedAt = now()
+            WHERE cpf = p_cpf;
+        ELSE
+            UPDATE public.accountsCitizen
+            SET loginAttempts = v_attempts + 1,
+                updatedAt = now()
+            WHERE cpf = p_cpf;
+        END IF;
+        RETURN FALSE;
+    END IF;
+
+    -- 4. Código válido: atualiza senha, consome o código e reseta bloqueio
+    UPDATE public.accountsCitizen
+    SET passwordHash = p_new_password_hash,
+        recoveryCodeHash = NULL,
+        recoveryCodeExpiresAt = NULL,
+        loginAttempts = 0,
+        blockedUntil = NULL,
+        updatedAt = now()
+    WHERE cpf = p_cpf;
+
+    RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION sosp_security.reset_citizen_password(VARCHAR, VARCHAR, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sosp_security.reset_citizen_password(VARCHAR, VARCHAR, TEXT) TO sosp_runtime_role;
+
+-- 5. Documentação no catálogo
 COMMENT ON FUNCTION sosp_security.authenticate_citizen_by_cpf(VARCHAR) IS
 'SOSP: Autenticação de menor privilégio. Retorna credenciais do CPF exato sob LIMIT 1, sem elevar a role da sessão.';
 COMMENT ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) IS
 'SOSP: Autenticação de usuários internos com menor privilégio (SECURITY DEFINER) sob RLS.';
+COMMENT ON FUNCTION sosp_security.set_citizen_recovery_code(VARCHAR, VARCHAR, TIMESTAMPTZ) IS
+'SOSP: Armazenamento seguro de código de recuperação de cidadão com hash bcrypt (pgcrypto) sob RLS.';
+COMMENT ON FUNCTION sosp_security.verify_citizen_recovery_code(VARCHAR, VARCHAR) IS
+'SOSP: Verificação criptográfica do código de 6 dígitos sem expor hashes, com proteção de bloqueio (RN-29, RN-30).';
+COMMENT ON FUNCTION sosp_security.reset_citizen_password(VARCHAR, VARCHAR, TEXT) IS
+'SOSP: Redefinição atômica de senha de cidadão com verificação obrigatória de código e consumo único sob RLS.';
 
 COMMIT;
