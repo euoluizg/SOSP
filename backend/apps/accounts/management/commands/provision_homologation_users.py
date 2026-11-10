@@ -64,6 +64,18 @@ class Command(BaseCommand):
             help="Sigla do órgão de lotação do servidor operacional (padrão: SSP).",
         )
         parser.add_argument(
+            "--agency-id",
+            type=str,
+            default=None,
+            help="ID (UUID) do órgão de lotação do servidor operacional.",
+        )
+        parser.add_argument(
+            "--unit-id",
+            type=str,
+            default=None,
+            help="ID (UUID) da unidade de atendimento para vincular o servidor.",
+        )
+        parser.add_argument(
             "--unit-name",
             type=str,
             default=None,
@@ -139,31 +151,76 @@ class Command(BaseCommand):
             )
 
         # 2. Localização de Órgão e Unidade Reais (Zero Criação Fictícia)
-        agency_acronym = options.get("agency_acronym") or "SSP"
+        agency_acronym = options.get("agency_acronym")
+        agency_id = options.get("agency_id")
+        unit_id = options.get("unit_id")
         allow_unlinked = options.get("allow_unlinked", False)
 
-        agency_ssp = Agency.objects.filter(acronym=agency_acronym, is_active=True).first()
-        if not agency_ssp:
-            if not allow_unlinked:
-                raise CommandError(
-                    f"Operação cancelada: Órgão com sigla '{agency_acronym}' não foi encontrado no catálogo de órgãos ativos. "
-                    "Cadastre o órgão previamente ou utilize a flag --allow-unlinked para provisionar o servidor sem vínculo inicial."
+        agency_ssp = None
+        if agency_id:
+            agency_ssp = Agency.objects.filter(id=agency_id, is_active=True).first()
+            if not agency_ssp:
+                if not allow_unlinked:
+                    raise CommandError(
+                        f"Operação cancelada: Órgão com ID '{agency_id}' não foi encontrado no catálogo de órgãos ativos. "
+                        "Verifique os dados ou utilize a flag --allow-unlinked para autorizar provisionamento sem vínculo."
+                    )
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"⚠ Órgão com ID '{agency_id}' não encontrado no catálogo. Servidor será provisionado sem vínculo de órgão (--allow-unlinked)."
+                    )
                 )
-            self.stdout.write(
-                self.style.WARNING(
-                    f"⚠ Órgão '{agency_acronym}' não encontrado no catálogo. Servidor será provisionado sem vínculo de órgão (--allow-unlinked)."
-                )
-            )
         else:
+            agency_acronym = agency_acronym or "SSP"
+            agency_ssp = Agency.objects.filter(acronym=agency_acronym, is_active=True).first()
+            if not agency_ssp:
+                if not allow_unlinked:
+                    raise CommandError(
+                        f"Operação cancelada: Órgão com sigla '{agency_acronym}' não foi encontrado no catálogo de órgãos ativos. "
+                        "Cadastre o órgão previamente ou utilize a flag --allow-unlinked para provisionar o servidor sem vínculo inicial."
+                    )
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"⚠ Órgão '{agency_acronym}' não encontrado no catálogo. Servidor será provisionado sem vínculo de órgão (--allow-unlinked)."
+                    )
+                )
+
+        if agency_ssp:
             self.stdout.write(f"✓ Órgão confirmado no catálogo: {agency_ssp.name} ({agency_ssp.acronym})")
 
         unit_central = None
-        if agency_ssp:
+        if unit_id:
+            unit_found = Unit.objects.filter(id=unit_id, is_active=True).select_related("agency").first()
+            if not unit_found:
+                if not allow_unlinked:
+                    raise CommandError(
+                        f"Operação cancelada: Unidade de atendimento com ID '{unit_id}' não foi encontrada ou está inativa no catálogo. "
+                        "Utilize a flag --allow-unlinked para prosseguir sem unidade."
+                    )
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"⚠ Unidade com ID '{unit_id}' não encontrada no catálogo. Servidor será provisionado com unit_id=None (--allow-unlinked)."
+                    )
+                )
+            else:
+                if agency_ssp and unit_found.agency_id != agency_ssp.id:
+                    raise CommandError(
+                        f"Operação cancelada: Inconsistência cadastral. A unidade '{unit_found.name}' pertence ao órgão "
+                        f"'{unit_found.agency.acronym}', não ao órgão selecionado '{agency_ssp.acronym}'."
+                    )
+                unit_central = unit_found
+                self.stdout.write(f"✓ Unidade de atendimento confirmada: {unit_central.name} ({unit_central.id})")
+        elif agency_ssp:
             unit_query = Unit.objects.filter(agency=agency_ssp, is_active=True)
             if options.get("unit_name"):
                 unit_query = unit_query.filter(name__icontains=options["unit_name"])
             unit_central = unit_query.first()
             if not unit_central:
+                if options.get("unit_name") and not allow_unlinked:
+                    raise CommandError(
+                        f"Operação cancelada: Nenhuma unidade com nome contendo '{options['unit_name']}' encontrada "
+                        f"para o órgão '{agency_ssp.acronym}'. Utilize --allow-unlinked se desejar provisionar sem unidade."
+                    )
                 self.stdout.write(
                     self.style.WARNING(
                         f"⚠ Nenhuma unidade de atendimento ativa encontrada para o órgão '{agency_ssp.acronym}'. "
@@ -255,7 +312,14 @@ class Command(BaseCommand):
                 if rotate:
                     existing_server.password_hash = make_password(server_pwd)
                     existing_server.must_change_password = True
-                    existing_server.save(update_fields=["password_hash", "must_change_password", "updated_at"])
+                    update_fields = ["password_hash", "must_change_password", "updated_at"]
+                    if agency_ssp:
+                        existing_server.agency_id = agency_ssp.id
+                        update_fields.append("agency_id")
+                    if unit_central:
+                        existing_server.unit_id = unit_central.id
+                        update_fields.append("unit_id")
+                    existing_server.save(update_fields=update_fields)
                     citizen_repository.revoke_all_sessions(str(existing_server.id), role="internal")
                     self.stdout.write(
                         self.style.SUCCESS(

@@ -356,10 +356,9 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
             self.call_count += 1
 
         def fetchone(self):
-            # Na 1ª chamada (authenticate_citizen_by_cpf), retorna None
-            if self.call_count == 1:
+            # Se a consulta for de cidadão, retorna None; se for de usuário interno, retorna dados do servidor
+            if "authenticate_citizen_by_cpf" in getattr(self, "last_sql", ""):
                 return None
-            # Na 2ª chamada (authenticate_internal_user_by_cpf), retorna dados do servidor operacional com unitId
             return (
                 fake_user_id,
                 "João Servidor Central",
