@@ -99,8 +99,8 @@ function ServicesContent() {
     });
   }, [services, query, category, agencyId, channel, municipality]);
 
-  // Paginação estrita de 10 itens por página (RN-05)
-  const pageSize = 10;
+  // Paginação de 5 itens por página para visualização otimizada
+  const pageSize = 5;
   const totalPages = Math.ceil(filteredServices.length / pageSize) || 1;
   const paginatedServices = useMemo(() => {
     const start = (currentPage - 1) * pageSize;

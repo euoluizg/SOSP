@@ -12,11 +12,23 @@ const publicSans = Public_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "SOSP — Sistema de Orientação para Serviços Públicos",
+  title: "SOSP • Sistema de Orientação para Serviços Públicos",
   description:
-    "Portal oficial de orientação, checklist de documentos e agendamento presencial para serviços públicos de Alagoas.",
-  keywords: ["serviços públicos", "agendamento", "documentos", "RG", "CNH", "Alagoas", "Maceió"],
+    "Plataforma acadêmica de orientação, checklist de documentos e agendamento presencial para serviços públicos de Alagoas. Projeto desenvolvido por estudantes de Engenharia de Software do CESMAC.",
+  keywords: ["serviços públicos", "agendamento", "documentos", "RG", "CIN", "CNH", "Alagoas", "Maceió", "CESMAC"],
   authors: [{ name: "CESMAC - Engenharia de Software" }],
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+  },
+  openGraph: {
+    title: "SOSP • Sistema de Orientação para Serviços Públicos",
+    description: "Plataforma acadêmica de orientação, checklist de documentos e agendamento presencial. Projeto CESMAC.",
+    siteName: "SOSP",
+    locale: "pt_BR",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -27,6 +39,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={publicSans.variable}>
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

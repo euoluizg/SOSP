@@ -8,6 +8,7 @@ import {
   Search,
   Filter,
   CheckCircle2,
+  AlertCircle,
   XCircle,
   Edit2,
   Trash2,
@@ -22,8 +23,8 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
-import { getAgencies } from "@/services/apiClient";
-import type { Agency } from "@/types/api";
+import { getAgencies, updateAgency } from "@/services/apiClient";
+import type { Agency, ProblemDetails } from "@/types/api";
 
 export default function AdminAgenciesPage() {
   const [agencies, setAgencies] = useState<Agency[]>([]);
@@ -31,17 +32,30 @@ export default function AdminAgenciesPage() {
   const [sphereFilter, setSphereFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modais de Criação e Desativação Lógica (RN-40)
+  // Modais de Criação, Edição e Desativação Lógica (RN-40)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingAgency, setEditingAgency] = useState<Agency | null>(null);
   const [deactivatingAgency, setDeactivatingAgency] = useState<Agency | null>(null);
 
-  // Form State
+  // Form State - Criação
   const [newAgency, setNewAgency] = useState({
     name: "",
     acronym: "",
     sphere: "state" as Agency["sphere"],
     description: "",
   });
+
+  // Form State - Edição
+  const [editForm, setEditForm] = useState({
+    name: "",
+    acronym: "",
+    sphere: "state" as Agency["sphere"],
+    description: "",
+  });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -74,6 +88,56 @@ export default function AdminAgenciesPage() {
     setAgencies((prev) => [created, ...prev]);
     setIsCreateModalOpen(false);
     setNewAgency({ name: "", acronym: "", sphere: "state", description: "" });
+  };
+
+  const handleStartEdit = (agency: Agency) => {
+    setEditingAgency(agency);
+    setEditForm({
+      name: agency.name,
+      acronym: agency.acronym,
+      sphere: agency.sphere,
+      description: agency.description || "",
+    });
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAgency) return;
+    if (!editForm.name.trim() || !editForm.acronym.trim()) {
+      setEditError("Sigla e nome do órgão são obrigatórios.");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    setEditError(null);
+    try {
+      const updated = await updateAgency(editingAgency.id, {
+        name: editForm.name.trim(),
+        acronym: editForm.acronym.trim().toUpperCase(),
+        sphere: editForm.sphere,
+        description: editForm.description.trim(),
+      });
+
+      setAgencies((prev) =>
+        prev.map((a) => (a.id === editingAgency.id ? { ...a, ...updated } : a))
+      );
+      setIsEditModalOpen(false);
+      setEditingAgency(null);
+      setSuccessToast(`Órgão ${updated.acronym} atualizado com sucesso!`);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setEditError(
+        problem?.detail ||
+          (problem?.errors && problem.errors.length > 0
+            ? problem.errors.map((e) => e.message).join(", ")
+            : "Erro ao atualizar órgão. Verifique suas permissões de gestor.")
+      );
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleConfirmDeactivate = () => {
@@ -231,14 +295,24 @@ export default function AdminAgenciesPage() {
                     <td className="py-4 px-6 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {agency.isActive && (
-                          <Button
-                            variant="danger"
-                            className="text-xs py-1 px-2.5"
-                            onClick={() => setDeactivatingAgency(agency)}
-                          >
-                            <Trash2 className="w-3.5 h-3.5 mr-1" />
-                            Desativar
-                          </Button>
+                          <>
+                            <Button
+                              variant="secondary"
+                              className="text-xs py-1 px-2.5"
+                              onClick={() => handleStartEdit(agency)}
+                            >
+                              <Edit2 className="w-3.5 h-3.5 mr-1" />
+                              Editar
+                            </Button>
+                            <Button
+                              variant="danger"
+                              className="text-xs py-1 px-2.5"
+                              onClick={() => setDeactivatingAgency(agency)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5 mr-1" />
+                              Desativar
+                            </Button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -316,6 +390,104 @@ export default function AdminAgenciesPage() {
             </Button>
             <Button type="submit" variant="primary">
               Salvar Órgão
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Notificação de Sucesso */}
+      {successToast && (
+        <div
+          className="fixed bottom-6 right-6 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-fadeIn"
+          role="status"
+          aria-live="polite"
+        >
+          <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+          <span className="text-sm font-semibold">{successToast}</span>
+        </div>
+      )}
+
+      {/* Modal de Edição de Órgão (Integrado ao backend PATCH /api/v1/agencies/{id}) */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingAgency(null);
+        }}
+        title={`Editar Órgão: ${editingAgency?.acronym || ""}`}
+      >
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          {editError && (
+            <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded text-xs text-red-700 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-500" />
+              <span>{editError}</span>
+            </div>
+          )}
+
+          <Input
+            label="Sigla Oficial"
+            id="edit-agency-acronym"
+            placeholder="Ex.: DETRAN, SEFAZ, SEMED"
+            value={editForm.acronym}
+            onChange={(e) => setEditForm({ ...editForm, acronym: e.target.value })}
+            required
+            helperText="Identificador siglar público do órgão"
+          />
+
+          <Input
+            label="Nome Completo do Órgão"
+            id="edit-agency-name"
+            placeholder="Ex.: Departamento Estadual de Trânsito de Alagoas"
+            value={editForm.name}
+            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+            required
+          />
+
+          <Select
+            label="Esfera Governamental"
+            id="edit-agency-sphere"
+            value={editForm.sphere}
+            onChange={(e) =>
+              setEditForm({ ...editForm, sphere: e.target.value as Agency["sphere"] })
+            }
+            options={[
+              { value: "state", label: "Estadual" },
+              { value: "municipal", label: "Municipal" },
+              { value: "federal", label: "Federal" },
+            ]}
+          />
+
+          <div>
+            <label
+              htmlFor="edit-agency-desc"
+              className="block text-sm font-semibold text-gray-700 mb-1.5"
+            >
+              Descrição Institucional
+            </label>
+            <textarea
+              id="edit-agency-desc"
+              rows={3}
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              placeholder="Competências e finalidade do órgão..."
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#1351B4]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={isSavingEdit}
+              onClick={() => {
+                setIsEditModalOpen(false);
+                setEditingAgency(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary" isLoading={isSavingEdit}>
+              Salvar Alterações
             </Button>
           </div>
         </form>
