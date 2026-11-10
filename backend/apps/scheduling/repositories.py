@@ -5,7 +5,13 @@ from django.conf import settings
 
 class SchedulingInMemoryRepository:
     def __init__(self):
-        self._appointments: List[Dict[str, Any]] = [
+        # Inicia estritamente vazio (Regra de Auditoria: zero agendamentos fictícios preexistentes)
+        self._appointments: List[Dict[str, Any]] = []
+        self._attachments: Dict[str, List[Dict[str, Any]]] = {}
+
+    def seed_test_fixtures(self) -> None:
+        """Carrega agendamentos sintéticos exclusivamente para testes automatizados sob demanda."""
+        self._appointments = [
             {
                 "id": "appt-001",
                 "protocolNumber": "20261105-1042",

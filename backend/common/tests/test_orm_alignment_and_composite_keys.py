@@ -54,7 +54,7 @@ def test_sqlite_empty_initialization_and_populated_data_migration_preserves_all_
 
         with conn_empty.cursor() as cur:
             cur.execute("SELECT count(*) FROM django_migrations;")
-            assert cur.fetchone()[0] == 14
+            assert cur.fetchone()[0] == len(executor_empty.loader.graph.nodes)
             cur.execute("PRAGMA foreign_key_check;")
             assert cur.fetchall() == []
     finally:

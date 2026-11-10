@@ -1,7 +1,7 @@
 import pytest
 from rest_framework.test import APIClient
 from apps.accounts.services import validate_cpf, validate_birth_date, validate_password_strength
-from apps.accounts.repositories import citizen_repository
+from apps.accounts.repositories import citizen_repository, get_demo_password
 
 client = APIClient()
 
@@ -70,7 +70,7 @@ def test_login_success_and_failure():
     # Sucesso
     resp_ok = client.post(
         "/api/v1/auth/login",
-        {"cpf": "11144477705", "password": "S0sp@2026!Fort3"},
+        {"cpf": "11144477705", "password": get_demo_password()},
         format="json",
     )
     assert resp_ok.status_code == 200
@@ -104,7 +104,7 @@ def test_logout_and_server_side_session_revocation():
     # 1. Login com emissão de token
     resp_login = client.post(
         "/api/v1/auth/login",
-        {"cpf": "11144477705", "password": "S0sp@2026!Fort3"},
+        {"cpf": "11144477705", "password": get_demo_password()},
         format="json",
     )
     assert resp_login.status_code == 200
