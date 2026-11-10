@@ -80,6 +80,7 @@ RETURNS TABLE (
     email VARCHAR,
     registration_number VARCHAR,
     agency_id UUID,
+    unit_id UUID,
     role VARCHAR,
     can_manage_catalog BOOLEAN,
     password_hash TEXT,
@@ -101,9 +102,10 @@ BEGIN
         u.email AS email,
         u.registrationNumber AS registration_number,
         u.agencyId AS agency_id,
+        u.unitId AS unit_id,
         u.role AS role,
         u.canManageCatalog AS can_manage_catalog,
-        u.passwordHash AS password_hash,
+        u.passwordHash::TEXT AS password_hash,
         u.isActive AS is_active
     FROM public.accountsInternalUser u
     WHERE u.cpf = p_cpf

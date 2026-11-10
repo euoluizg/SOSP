@@ -200,13 +200,15 @@ class CitizenInMemoryRepository:
 
     def set_recovery_code(self, cpf: str, code: str) -> None:
         clean_cpf = "".join(filter(str.isdigit, cpf))
-        # Válido por 15 minutos (900 segundos) - RN-30
+        # Armazenamento seguro de verificador criptográfico (não em texto puro)
         self._recovery_codes[clean_cpf] = {
-            "code": code,
+            "code_hash": make_password(code),
             "expires_at": time.time() + 900,
+            "failed_attempts": 0,
         }
 
     def verify_recovery_code(self, cpf: str, code: str) -> bool:
+        from django.contrib.auth.hashers import check_password
         clean_cpf = "".join(filter(str.isdigit, cpf))
         rec = self._recovery_codes.get(clean_cpf)
         if not rec:
@@ -214,7 +216,18 @@ class CitizenInMemoryRepository:
         if time.time() > rec["expires_at"]:
             del self._recovery_codes[clean_cpf]
             return False
-        return rec["code"] == code
+        if rec.get("failed_attempts", 0) >= 5:
+            del self._recovery_codes[clean_cpf]
+            return False
+
+        if check_password(code, rec.get("code_hash", "")):
+            rec["failed_attempts"] = 0
+            return True
+        else:
+            rec["failed_attempts"] = rec.get("failed_attempts", 0) + 1
+            if rec["failed_attempts"] >= 5:
+                del self._recovery_codes[clean_cpf]
+            return False
 
     def clear_recovery_code(self, cpf: str) -> None:
         clean_cpf = "".join(filter(str.isdigit, cpf))
@@ -323,13 +336,13 @@ class CitizenDjangoORMRepository:
 
                     # 1.2 Consulta usuário interno (servidores, gestores e administradores) via função cirúrgica sob RLS
                     cur.execute(
-                        "SELECT user_id, full_name, email, registration_number, agency_id, role, can_manage_catalog, password_hash, is_active "
+                        "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
                         "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
                         [clean_cpf]
                     )
                     irow = cur.fetchone()
                     if irow:
-                        role = irow[5]
+                        role = irow[6]
                         if role in ("servant", "server"):
                             role = "server"
                         elif role in ("manager", "gestor"):
@@ -342,11 +355,11 @@ class CitizenDjangoORMRepository:
                             "email": irow[2],
                             "registrationNumber": irow[3],
                             "agencyId": str(irow[4]) if irow[4] else None,
-                            "unitId": None,
+                            "unitId": str(irow[5]) if irow[5] else None,
                             "role": role,
-                            "canManageCatalog": irow[6],
-                            "passwordHash": irow[7],
-                            "isActive": irow[8],
+                            "canManageCatalog": irow[7],
+                            "passwordHash": irow[8],
+                            "isActive": irow[9],
                             "blockedUntil": None,
                             "loginAttempts": 0,
                         }
@@ -391,7 +404,7 @@ class CitizenDjangoORMRepository:
                 "loginAttempts": 0,
                 "role": role,
                 "agencyId": str(u.agency_id) if u.agency_id else None,
-                "unitId": None,
+                "unitId": str(u.unit_id) if u.unit_id else None,
                 "canManageCatalog": u.can_manage_catalog,
             }
 
@@ -542,8 +555,10 @@ class CitizenDjangoORMRepository:
         from django.utils import timezone
         clean_cpf = "".join(filter(str.isdigit, cpf))
         exp = timezone.now() + datetime.timedelta(minutes=15)
+        # Armazenamento criptográfico seguro do código verificador (não em texto puro)
+        code_verifier_hash = make_password(code)
         updated = Citizen.objects.filter(cpf=clean_cpf, is_active=True).update(
-            recovery_code_hash=code,
+            recovery_code_hash=code_verifier_hash,
             recovery_code_expires_at=exp
         )
         if not updated:
@@ -551,26 +566,54 @@ class CitizenDjangoORMRepository:
             if u:
                 PasswordReset.objects.create(
                     internal_user=u,
-                    code_hash=code,
+                    code_hash=code_verifier_hash,
                     expires_at=exp
                 )
 
     def verify_recovery_code(self, cpf: str, code: str) -> bool:
         from .models import Citizen, InternalUser, PasswordReset
         from django.utils import timezone
+        from django.contrib.auth.hashers import check_password
         clean_cpf = "".join(filter(str.isdigit, cpf))
+
+        # Proteção contra força bruta: se estiver bloqueado temporariamente (RN-29), rejeita
+        locked_out, _ = self.is_locked_out(clean_cpf)
+        if locked_out:
+            return False
+
         c = Citizen.objects.filter(cpf=clean_cpf, is_active=True).first()
         if c and c.recovery_code_hash:
             if c.recovery_code_expires_at and timezone.now() > c.recovery_code_expires_at:
+                self.clear_recovery_code(clean_cpf)
                 return False
-            return c.recovery_code_hash == code
+
+            is_valid = check_password(code, c.recovery_code_hash)
+            if not is_valid:
+                attempts = self.record_failed_attempt(clean_cpf)
+                if attempts >= 5:
+                    self.clear_recovery_code(clean_cpf)
+                return False
+
+            self.reset_failed_attempts(clean_cpf)
+            return True
 
         u = InternalUser.objects.filter(cpf=clean_cpf, is_active=True).first()
         if u:
-            pr = PasswordReset.objects.filter(internal_user=u, code_hash=code, used_at__isnull=True).order_by("-created_at").first()
+            pr = PasswordReset.objects.filter(internal_user=u, used_at__isnull=True).order_by("-created_at").first()
             if pr:
                 if timezone.now() > pr.expires_at:
+                    pr.used_at = timezone.now()
+                    pr.save(update_fields=["used_at"])
                     return False
+
+                is_valid = check_password(code, pr.code_hash)
+                if not is_valid:
+                    attempts = self.record_failed_attempt(clean_cpf)
+                    if attempts >= 5:
+                        self.clear_recovery_code(clean_cpf)
+                    return False
+
+                self.reset_failed_attempts(clean_cpf)
                 return True
         return False
 

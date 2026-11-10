@@ -344,7 +344,8 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
 
     fake_user_id = uuid.uuid4()
     fake_agency_id = uuid.uuid4()
-    clean_cpf = "55588811194"
+    fake_unit_id = uuid.uuid4()
+    clean_cpf = "33366699957"
 
     class FakeCursor:
         def __init__(self):
@@ -358,15 +359,16 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
             # Na 1ª chamada (authenticate_citizen_by_cpf), retorna None
             if self.call_count == 1:
                 return None
-            # Na 2ª chamada (authenticate_internal_user_by_cpf), retorna dados do gestor
+            # Na 2ª chamada (authenticate_internal_user_by_cpf), retorna dados do servidor operacional com unitId
             return (
                 fake_user_id,
-                "Carlos Gestor SSP",
-                "carlos.gestor@ssp.al.gov.br",
-                "GES-3003",
+                "João Servidor Central",
+                "joao.servidor@ssp.al.gov.br",
+                "SSP-1001",
                 fake_agency_id,
-                "manager",
-                True,
+                fake_unit_id,
+                "servant",
+                False,
                 "argon2_hash_dummy",
                 True,
             )
@@ -385,9 +387,10 @@ def test_postgresql_internal_user_auth_mapping(monkeypatch):
 
     assert auth_data is not None
     assert auth_data["id"] == str(fake_user_id)
-    assert auth_data["fullName"] == "Carlos Gestor SSP"
-    assert auth_data["role"] == "gestor"
+    assert auth_data["fullName"] == "João Servidor Central"
+    assert auth_data["role"] == "server"
     assert auth_data["agencyId"] == str(fake_agency_id)
-    assert auth_data["canManageCatalog"] is True
+    assert auth_data["unitId"] == str(fake_unit_id)
+    assert auth_data["canManageCatalog"] is False
     assert auth_data["isActive"] is True
 

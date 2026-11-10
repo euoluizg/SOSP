@@ -71,6 +71,7 @@ class InternalUser(models.Model):
     email = models.CharField(max_length=200)
     registration_number = models.CharField(db_column="registrationnumber", max_length=20)
     agency_id = models.UUIDField(db_column="agencyid", null=True, blank=True)
+    unit_id = models.UUIDField(db_column="unitid", null=True, blank=True)
     role = models.CharField(max_length=20)
     can_manage_catalog = models.BooleanField(db_column="canmanagecatalog", default=False)
     password_hash = models.CharField(db_column="passwordhash", max_length=255)

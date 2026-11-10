@@ -102,6 +102,7 @@ BEGIN;
     email               varchar(200) NOT NULL,
     registrationNumber  varchar(20) NOT NULL,
     agencyId            uuid,
+    unitId              uuid,
     role                varchar(20) NOT NULL,
     canManageCatalog    boolean NOT NULL DEFAULT false,
     passwordHash        varchar(255) NOT NULL,
@@ -120,6 +121,7 @@ BEGIN;
   CREATE UNIQUE INDEX uqAccountsInternalUserEmail ON accountsInternalUser (lower(email)) WHERE deletedAt IS NULL;
   CREATE UNIQUE INDEX uqAccountsInternalUserRegistration ON accountsInternalUser (registrationNumber) WHERE deletedAt IS NULL;
   CREATE INDEX idxAccountsInternalUserAgency ON accountsInternalUser (agencyId);
+  CREATE INDEX idxAccountsInternalUserUnit ON accountsInternalUser (unitId);
 
   -- Função de autenticação cirúrgica de menor privilégio para usuários internos (sosp_security)
   CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
@@ -129,6 +131,7 @@ BEGIN;
       email VARCHAR,
       registration_number VARCHAR,
       agency_id UUID,
+      unit_id UUID,
       role VARCHAR,
       can_manage_catalog BOOLEAN,
       password_hash TEXT,
@@ -150,9 +153,10 @@ BEGIN;
           u.email AS email,
           u.registrationNumber AS registration_number,
           u.agencyId AS agency_id,
+          u.unitId AS unit_id,
           u.role AS role,
           u.canManageCatalog AS can_manage_catalog,
-          u.passwordHash AS password_hash,
+          u.passwordHash::TEXT AS password_hash,
           u.isActive AS is_active
       FROM public.accountsInternalUser u
       WHERE u.cpf = p_cpf
@@ -163,6 +167,13 @@ BEGIN;
   $$;
 
   REVOKE ALL ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) FROM PUBLIC;
+  DO $$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sosp_runtime_role') THEN
+      GRANT EXECUTE ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) TO sosp_runtime_role;
+    END IF;
+  END;
+  $$;
   COMMENT ON FUNCTION sosp_security.authenticate_internal_user_by_cpf(VARCHAR) IS
   'SOSP: Autenticação de usuários internos com menor privilégio (SECURITY DEFINER) sob RLS.';
   

@@ -1,0 +1,71 @@
+from django.db import migrations, models
+
+
+def align_accounts_schema_forward(apps, schema_editor):
+    """
+    Aplica incrementalmente as colunas de schema:
+    1. genderDescription em accountsCitizen.
+    2. unitId em accountsInternalUser.
+    Preserva idempotência tanto em PostgreSQL quanto em SQLite.
+    """
+    connection = schema_editor.connection
+    with connection.cursor() as cursor:
+        if connection.vendor == "postgresql":
+            cursor.execute(
+                """
+                ALTER TABLE accountsCitizen
+                    ADD COLUMN IF NOT EXISTS genderDescription varchar(120);
+
+                ALTER TABLE accountsInternalUser
+                    ADD COLUMN IF NOT EXISTS unitId uuid;
+
+                CREATE INDEX IF NOT EXISTS idxAccountsInternalUserUnit
+                    ON accountsInternalUser (unitId);
+                """
+            )
+        else:
+            # SQLite: adiciona colunas caso ainda não existam no schema da tabela
+            cursor.execute("PRAGMA table_info(accountscitizen);")
+            citizen_cols = [row[1] for row in cursor.fetchall()]
+            if "genderdescription" not in citizen_cols:
+                cursor.execute("ALTER TABLE accountscitizen ADD COLUMN genderdescription varchar(120) NULL;")
+
+            cursor.execute("PRAGMA table_info(accountsinternaluser);")
+            internal_cols = [row[1] for row in cursor.fetchall()]
+            if "unitid" not in internal_cols:
+                cursor.execute("ALTER TABLE accountsinternaluser ADD COLUMN unitid char(32) NULL;")
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ("accounts", "0001_initial"),
+    ]
+
+    operations = [
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name="citizen",
+                    name="gender_description",
+                    field=models.CharField(
+                        blank=True,
+                        db_column="genderdescription",
+                        max_length=120,
+                        null=True,
+                    ),
+                ),
+                migrations.AddField(
+                    model_name="internaluser",
+                    name="unit_id",
+                    field=models.UUIDField(
+                        blank=True,
+                        db_column="unitid",
+                        null=True,
+                    ),
+                ),
+            ],
+            database_operations=[],
+        ),
+        migrations.RunPython(align_accounts_schema_forward, reverse_code=migrations.RunPython.noop),
+    ]

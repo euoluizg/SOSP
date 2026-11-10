@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.hashers import make_password
 from apps.accounts.models import Citizen, InternalUser, Gender
-from apps.catalog.models import Agency
+from apps.catalog.models import Agency, Unit
 
 class Command(BaseCommand):
     help = "Cria ou atualiza com idempotência os usuários sintéticos de demonstração do SOSP (cidadãos, servidores e gestores)."
@@ -114,13 +114,13 @@ class Command(BaseCommand):
             action = "Criado" if created else "Atualizado"
             self.stdout.write(self.style.SUCCESS(f"  [Cidadão] {action}: {c.full_name} ({c.cpf})"))
 
-        # 3. Garante órgãos institucionais de lotação (ADR-003 / RN-35 / RN-36)
+        # 3. Garante órgãos e unidades institucionais de lotação (ADR-003 / RN-35 / RN-36)
         agency_ssp = Agency.objects.filter(acronym="SSP", is_active=True).first()
         if not agency_ssp:
             agency_ssp = Agency.objects.create(
                 name="Secretaria de Estado da Segurança Pública",
                 acronym="SSP",
-                sphere="Estadual",
+                sphere="state",
                 description="Responsável pela segurança pública e identificação civil.",
                 is_active=True,
             )
@@ -130,8 +130,39 @@ class Command(BaseCommand):
             agency_detran = Agency.objects.create(
                 name="Departamento Estadual de Trânsito",
                 acronym="DETRAN",
-                sphere="Estadual",
+                sphere="state",
                 description="Responsável pela habilitação de condutores e trânsito.",
+                is_active=True,
+            )
+
+        # Garante unidades de atendimento para vinculação de servidores operacionais
+        unit_ssp_centro = Unit.objects.filter(agency=agency_ssp, name__icontains="Central", is_active=True).first()
+        if not unit_ssp_centro:
+            unit_ssp_centro = Unit.objects.create(
+                agency=agency_ssp,
+                name="Posto Central SSP",
+                zip_code="57020100",
+                street="Rua do Comércio",
+                neighborhood="Centro",
+                city="Maceió",
+                state="AL",
+                address_number="123",
+                daily_limit=40,
+                is_active=True,
+            )
+
+        unit_detran_farol = Unit.objects.filter(agency=agency_detran, name__icontains="Farol", is_active=True).first()
+        if not unit_detran_farol:
+            unit_detran_farol = Unit.objects.create(
+                agency=agency_detran,
+                name="Posto Farol DETRAN",
+                zip_code="57051000",
+                street="Av. Fernandes Lima",
+                neighborhood="Farol",
+                city="Maceió",
+                state="AL",
+                address_number="456",
+                daily_limit=40,
                 is_active=True,
             )
 
@@ -143,6 +174,7 @@ class Command(BaseCommand):
                 "email": "joao.servidor@ssp.al.gov.br",
                 "role": "servant",
                 "agency_id": agency_ssp.id,
+                "unit_id": unit_ssp_centro.id,
                 "can_manage_catalog": False,
                 "registration_number": "SSP-1001",
             },
@@ -152,6 +184,7 @@ class Command(BaseCommand):
                 "email": "ana.servidora@detran.al.gov.br",
                 "role": "servant",
                 "agency_id": agency_detran.id,
+                "unit_id": unit_detran_farol.id,
                 "can_manage_catalog": False,
                 "registration_number": "DET-2002",
             },
@@ -161,6 +194,7 @@ class Command(BaseCommand):
                 "email": "carlos.gestor@ssp.al.gov.br",
                 "role": "gestor",
                 "agency_id": agency_ssp.id,
+                "unit_id": None,
                 "can_manage_catalog": True,
                 "registration_number": "GES-3003",
             },
@@ -170,6 +204,7 @@ class Command(BaseCommand):
                 "email": "admin@sosp.al.gov.br",
                 "role": "superadmin",
                 "agency_id": None,
+                "unit_id": None,
                 "can_manage_catalog": True,
                 "registration_number": "ADM-0001",
             },
@@ -183,6 +218,7 @@ class Command(BaseCommand):
                     "email": u_data["email"],
                     "role": u_data["role"],
                     "agency_id": u_data.get("agency_id"),
+                    "unit_id": u_data.get("unit_id"),
                     "can_manage_catalog": u_data.get("can_manage_catalog", False),
                     "registration_number": u_data["registration_number"],
                     "password_hash": pwd_hash,

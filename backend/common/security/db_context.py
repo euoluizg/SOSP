@@ -85,7 +85,13 @@ def set_db_security_context(
 
     if user and getattr(user, "is_authenticated", False):
         user_id = getattr(user, "id", None)
-        role = getattr(user, "role", "citizen")
+        raw_role = getattr(user, "role", "citizen")
+        if raw_role in ("server", "servant", "servidor", "gestor", "manager"):
+            role = "server"
+        elif raw_role in ("admin", "superadmin", "administrador"):
+            role = "admin" if raw_role == "admin" else "superadmin"
+        else:
+            role = "citizen"
         agency_id = getattr(user, "agency_id", None)
     else:
         user_id = None
