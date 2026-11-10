@@ -3,6 +3,7 @@ import uuid
 import secrets
 import pytest
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from rest_framework.test import APIClient
 from django.contrib.auth.hashers import check_password, make_password
 from apps.accounts.models import InternalUser, Citizen
@@ -21,9 +22,37 @@ def client(settings):
     return APIClient()
 
 
+@pytest.fixture
+def ssp_agency_and_unit():
+    """Garante órgão SSP e unidade Central Já! Centro cadastrados de forma válida no catálogo."""
+    agency = Agency.objects.create(
+        name="Secretaria de Segurança Pública",
+        acronym="SSP",
+        sphere="state",
+        description="Órgão responsável pela segurança pública em Alagoas.",
+        is_active=True,
+    )
+    unit = Unit.objects.create(
+        agency=agency,
+        name="Central Já! Centro",
+        zip_code="57020100",
+        street="Rua do Sol",
+        neighborhood="Centro",
+        city="Maceió",
+        state="AL",
+        address_number="123",
+        daily_limit=40,
+        is_accessible=True,
+        has_priority_service=True,
+        is_active=True,
+    )
+    return agency, unit
+
+
 @pytest.mark.django_db
-def test_provision_homologation_users_creates_exact_accounts(settings):
+def test_provision_homologation_users_creates_exact_accounts_with_preexisting_catalog(settings, ssp_agency_and_unit):
     settings.REPOSITORY_BACKEND = "orm"
+    agency_ssp, unit_central = ssp_agency_and_unit
     admin_tmp = _dynamic_secret()
     server_tmp = _dynamic_secret()
 
@@ -58,35 +87,147 @@ def test_provision_homologation_users_creates_exact_accounts(settings):
     assert server.full_name == "João Servidor Central"
     assert server.registration_number == "SSP-1001"
     assert server.role == "server"
-    assert server.agency_id is not None
-    assert server.unit_id is not None
+    assert server.agency_id == agency_ssp.id
+    assert server.unit_id == unit_central.id
     assert server.can_manage_catalog is False
     assert server.must_change_password is True
     assert server.is_active is True
     assert check_password(server_tmp, server.password_hash)
 
-    # 3. Confirma que a lotação vinculada existe
-    agency = Agency.objects.get(id=server.agency_id)
-    assert agency.acronym == "SSP"
-    unit = Unit.objects.get(id=server.unit_id)
-    assert "Central" in unit.name
-
-    # 4. Confirma que ZERO contas de cidadão foram criadas
+    # 3. Confirma que ZERO contas de cidadão foram criadas
     assert Citizen.objects.count() == 0
 
-    # 5. Idempotência: rodar novamente não cria duplicatas nem falha
+
+@pytest.mark.django_db
+def test_provision_without_preexisting_agency_fails_without_allow_unlinked(settings):
+    """Garante que o provisionamento aborta e NÃO inventa órgãos ou unidades fictícias."""
+    settings.REPOSITORY_BACKEND = "orm"
+    assert Agency.objects.count() == 0
+    assert Unit.objects.count() == 0
+
+    with pytest.raises(CommandError) as exc:
+        call_command(
+            "provision_homologation_users",
+            admin_password=_dynamic_secret(),
+            server_password=_dynamic_secret(),
+        )
+    assert "não foi encontrado no catálogo" in str(exc.value)
+    # Zero unidades criadas
+    assert Unit.objects.count() == 0
+    assert Agency.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_provision_with_allow_unlinked_creates_server_without_unit(settings):
+    """Com --allow-unlinked, servidor é provisionado sem unidade vinculada (fail-closed)."""
+    settings.REPOSITORY_BACKEND = "orm"
+    admin_tmp = _dynamic_secret()
+    server_tmp = _dynamic_secret()
+
+    out = io.StringIO()
     call_command(
         "provision_homologation_users",
         admin_password=admin_tmp,
         server_password=server_tmp,
+        allow_unlinked=True,
         stdout=out,
     )
+    server = InternalUser.objects.filter(cpf="33366699957").first()
+    assert server is not None
+    assert server.agency_id is None
+    assert server.unit_id is None
+    # Zero dados fictícios criados no catálogo
+    assert Unit.objects.count() == 0
+    assert Agency.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_provision_idempotence_preserves_credentials_and_settings(settings, ssp_agency_and_unit):
+    """Segunda execução NUNCA sobrescreve senha, must_change_password ou desativação de usuário."""
+    settings.REPOSITORY_BACKEND = "orm"
+    admin_initial = _dynamic_secret()
+    server_initial = _dynamic_secret()
+
+    # 1ª Execução: cria as contas
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_initial,
+        server_password=server_initial,
+    )
+    admin = InternalUser.objects.get(cpf="99988877714")
+    server = InternalUser.objects.get(cpf="33366699957")
+    admin_hash_1 = admin.password_hash
+    server_hash_1 = server.password_hash
+
+    # Simula que o admin já alterou sua senha para definitiva
+    admin.must_change_password = False
+    admin.save()
+
+    # Simula que o servidor foi desativado por um administrador
+    server.is_active = False
+    server.save()
+
+    # 2ª Execução: tenta passar novas senhas
+    admin_second = _dynamic_secret()
+    server_second = _dynamic_secret()
+    out = io.StringIO()
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_second,
+        server_password=server_second,
+        stdout=out,
+    )
+    output = out.getvalue()
+    assert "[PRESERVADO]" in output
+
+    # Recarrega do banco e valida que NADA foi sobrescrito
+    admin.refresh_from_db()
+    server.refresh_from_db()
+    assert admin.password_hash == admin_hash_1
+    assert admin.must_change_password is False  # Não foi resetado para True!
+    assert server.password_hash == server_hash_1
+    assert server.is_active is False  # Não foi reativado silenciosamente!
     assert InternalUser.objects.filter(cpf="99988877714").count() == 1
     assert InternalUser.objects.filter(cpf="33366699957").count() == 1
 
 
 @pytest.mark.django_db
-def test_institutional_first_access_flow_and_mandatory_password_change(client):
+def test_provision_rotate_credentials_explicitly(settings, ssp_agency_and_unit):
+    """Com --rotate-credentials e --confirm, senhas são atualizadas e must_change_password é restaurado."""
+    settings.REPOSITORY_BACKEND = "orm"
+    admin_initial = _dynamic_secret()
+    server_initial = _dynamic_secret()
+
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_initial,
+        server_password=server_initial,
+    )
+    admin = InternalUser.objects.get(cpf="99988877714")
+    admin.must_change_password = False
+    admin.save()
+
+    # Tentativa de rotação sem --confirm é bloqueada
+    with pytest.raises(CommandError):
+        call_command("provision_homologation_users", rotate_credentials=True)
+
+    # Rotação com --confirm tem êxito
+    admin_rotated = _dynamic_secret()
+    server_rotated = _dynamic_secret()
+    call_command(
+        "provision_homologation_users",
+        admin_password=admin_rotated,
+        server_password=server_rotated,
+        rotate_credentials=True,
+        confirm=True,
+    )
+    admin.refresh_from_db()
+    assert admin.must_change_password is True
+    assert check_password(admin_rotated, admin.password_hash)
+
+
+@pytest.mark.django_db
+def test_institutional_first_access_flow_and_mandatory_password_change(client, ssp_agency_and_unit):
     """
     Fluxo completo:
     1. Login institucional com credencial temporária.
@@ -214,7 +355,7 @@ def test_institutional_first_access_flow_and_mandatory_password_change(client):
 
 
 @pytest.mark.django_db
-def test_server_operational_first_access_flow(client):
+def test_server_operational_first_access_flow(client, ssp_agency_and_unit):
     """Valida fluxo de primeiro acesso para servidor operacional (João Servidor Central)."""
     server_tmp = _dynamic_secret()
     call_command(

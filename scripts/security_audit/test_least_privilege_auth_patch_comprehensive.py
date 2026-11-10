@@ -210,13 +210,13 @@ def test_least_privilege_patch():
 
                 # Usuários Internos (com unitId operacional atribuído conforme ADR-003 / RN-36)
                 cur.execute("""
-                INSERT INTO public.accountsInternalUser (id, cpf, fullName, email, registrationNumber, agencyId, unitId, role, canManageCatalog, passwordHash, isActive, deletedAt)
+                INSERT INTO public.accountsInternalUser (id, cpf, fullName, email, registrationNumber, agencyId, unitId, role, canManageCatalog, passwordHash, mustChangePassword, isActive, deletedAt)
                 VALUES
-                (%s, '33366699957', 'João Servidor Central', 'joao.servidor@ssp.al.gov.br', 'SSP-1001', %s, %s, 'servant', false, %s, true, NULL),
-                (%s, '55588811194', 'Carlos Gestor SSP', 'carlos.gestor@ssp.al.gov.br', 'GES-3003', %s, NULL, 'gestor', true, %s, true, NULL),
-                (%s, '99988877714', 'Admin SOSP Geral', 'admin@sosp.al.gov.br', 'ADM-0001', NULL, NULL, 'superadmin', true, %s, true, NULL),
-                (%s, '44455566677', 'Servidor Inativo', 'inativo@ssp.al.gov.br', 'SSP-9999', %s, %s, 'servant', false, %s, false, NULL),
-                (%s, '88899900011', 'Servidor Excluído', 'excluido@ssp.al.gov.br', 'SSP-8888', %s, %s, 'servant', false, %s, true, now());
+                (%s, '33366699957', 'João Servidor Central', 'joao.servidor@ssp.al.gov.br', 'SSP-1001', %s, %s, 'servant', false, %s, false, true, NULL),
+                (%s, '55588811194', 'Carlos Gestor SSP', 'carlos.gestor@ssp.al.gov.br', 'GES-3003', %s, NULL, 'gestor', true, %s, false, true, NULL),
+                (%s, '99988877714', 'Admin SOSP Geral', 'admin@sosp.al.gov.br', 'ADM-0001', NULL, NULL, 'superadmin', true, %s, false, true, NULL),
+                (%s, '44455566677', 'Servidor Inativo', 'inativo@ssp.al.gov.br', 'SSP-9999', %s, %s, 'servant', false, %s, false, false, NULL),
+                (%s, '88899900011', 'Servidor Excluído', 'excluido@ssp.al.gov.br', 'SSP-8888', %s, %s, 'servant', false, %s, false, true, now());
                 """, (
                     joao_id, agency_ssp_id, unit_ssp_centro_id, pwd_hash,
                     carlos_id, agency_ssp_id, pwd_hash,

@@ -368,12 +368,22 @@ class CitizenDjangoORMRepository:
                         }
 
                     # 1.2 Consulta usuário interno (servidores, gestores e administradores) via função cirúrgica sob RLS
-                    cur.execute(
-                        "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active, must_change_password "
-                        "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
-                        [clean_cpf]
-                    )
-                    irow = cur.fetchone()
+                    try:
+                        cur.execute(
+                            "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active, must_change_password "
+                            "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
+                            [clean_cpf]
+                        )
+                        irow = cur.fetchone()
+                    except Exception:
+                        # Fallback de retrocompatibilidade para assinatura de 10 colunas em caso de rollback de schema
+                        cur.execute(
+                            "SELECT user_id, full_name, email, registration_number, agency_id, unit_id, role, can_manage_catalog, password_hash, is_active "
+                            "FROM sosp_security.authenticate_internal_user_by_cpf(%s);",
+                            [clean_cpf]
+                        )
+                        irow = cur.fetchone()
+
                     if irow:
                         role = irow[6]
                         if role in ("servant", "server"):

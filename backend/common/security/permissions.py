@@ -25,6 +25,7 @@ class IsCitizen(BasePermission):
 class HasChangedTemporaryPassword(BasePermission):
     """Bloqueia usuários institucionais que precisam alterar a senha temporária no primeiro acesso."""
     message = "É obrigatório alterar a senha temporária no primeiro acesso antes de realizar operações no sistema."
+    code = "CHANGE_PASSWORD_REQUIRED"
 
     def has_permission(self, request, view):
         return not bool(

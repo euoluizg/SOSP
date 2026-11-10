@@ -5,6 +5,7 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Tuple, Optional
 from django.conf import settings
+from django.db import transaction
 from django.contrib.auth.hashers import make_password, check_password
 from common.exceptions import ProblemDetailsException
 from common.security.authentication import generate_sosp_token
@@ -380,63 +381,64 @@ class AccountService:
         is_internal = role not in ("citizen", "cidadao")
         new_hash = make_password(new_password)
 
-        if is_internal:
-            from .models import InternalUser
-            internal_user = InternalUser.objects.filter(id=user_id, is_active=True, deleted_at__isnull=True).first()
-            if not internal_user:
-                raise ProblemDetailsException(detail="Usuário institucional não encontrado.", status_code=404)
-            if not check_password(current_password, internal_user.password_hash):
-                raise ProblemDetailsException(
-                    detail="A senha atual informada está incorreta.",
-                    title="Credencial Inválida",
-                    status_code=400,
-                    errors=[{"field": "currentPassword", "message": "A senha atual informada está incorreta."}],
-                )
-            internal_user.password_hash = new_hash
-            internal_user.must_change_password = False
-            internal_user.save(update_fields=["password_hash", "must_change_password", "updated_at"])
-            citizen_repository.revoke_all_sessions(user_id, role="internal")
-        else:
-            from .models import Citizen
-            citizen_user = Citizen.objects.filter(id=user_id, is_active=True, deleted_at__isnull=True).first()
-            if not citizen_user:
-                raise ProblemDetailsException(detail="Cidadão não encontrado.", status_code=404)
-            if not check_password(current_password, citizen_user.password_hash):
-                raise ProblemDetailsException(
-                    detail="A senha atual informada está incorreta.",
-                    title="Credencial Inválida",
-                    status_code=400,
-                    errors=[{"field": "currentPassword", "message": "A senha atual informada está incorreta."}],
-                )
-            citizen_user.password_hash = new_hash
-            citizen_user.save(update_fields=["password_hash", "updated_at"])
-            citizen_repository.revoke_all_sessions(user_id, role="citizen")
+        with transaction.atomic():
+            if is_internal:
+                from .models import InternalUser
+                internal_user = InternalUser.objects.select_for_update().filter(id=user_id, is_active=True, deleted_at__isnull=True).first()
+                if not internal_user:
+                    raise ProblemDetailsException(detail="Usuário institucional não encontrado.", status_code=404)
+                if not check_password(current_password, internal_user.password_hash):
+                    raise ProblemDetailsException(
+                        detail="A senha atual informada está incorreta.",
+                        title="Credencial Inválida",
+                        status_code=400,
+                        errors=[{"field": "currentPassword", "message": "A senha atual informada está incorreta."}],
+                    )
+                internal_user.password_hash = new_hash
+                internal_user.must_change_password = False
+                internal_user.save(update_fields=["password_hash", "must_change_password", "updated_at"])
+                citizen_repository.revoke_all_sessions(user_id, role="internal")
+            else:
+                from .models import Citizen
+                citizen_user = Citizen.objects.select_for_update().filter(id=user_id, is_active=True, deleted_at__isnull=True).first()
+                if not citizen_user:
+                    raise ProblemDetailsException(detail="Cidadão não encontrado.", status_code=404)
+                if not check_password(current_password, citizen_user.password_hash):
+                    raise ProblemDetailsException(
+                        detail="A senha atual informada está incorreta.",
+                        title="Credencial Inválida",
+                        status_code=400,
+                        errors=[{"field": "currentPassword", "message": "A senha atual informada está incorreta."}],
+                    )
+                citizen_user.password_hash = new_hash
+                citizen_user.save(update_fields=["password_hash", "updated_at"])
+                citizen_repository.revoke_all_sessions(user_id, role="citizen")
 
-        # Emite novo token com must_change_password=False
-        new_token = generate_sosp_token(
-            user_id=user_id,
-            role=role,
-            agency_id=getattr(user, "agency_id", None),
-            cpf=getattr(user, "cpf", ""),
-            full_name=getattr(user, "full_name", ""),
-            email=getattr(user, "email", ""),
-            unit_id=getattr(user, "unit_id", None),
-            must_change_password=False,
-        )
-
-        # Registra a nova sessão ativa
-        token_hash = hashlib.sha256(new_token.encode("utf-8")).hexdigest()
-        subject_type = "citizen" if not is_internal else "internal"
-        try:
-            citizen_repository.create_session(
-                subject_type=subject_type,
-                subject_id=user_id,
-                token_hash=token_hash,
+            # Emite novo token com must_change_password=False
+            new_token = generate_sosp_token(
+                user_id=user_id,
                 role=role,
                 agency_id=getattr(user, "agency_id", None),
+                cpf=getattr(user, "cpf", ""),
+                full_name=getattr(user, "full_name", ""),
+                email=getattr(user, "email", ""),
+                unit_id=getattr(user, "unit_id", None),
+                must_change_password=False,
             )
-        except Exception as e:
-            logger.warning("Falha ao registrar nova sessão após troca de senha: %s", e)
+
+            # Registra a nova sessão ativa
+            token_hash = hashlib.sha256(new_token.encode("utf-8")).hexdigest()
+            subject_type = "citizen" if not is_internal else "internal"
+            try:
+                citizen_repository.create_session(
+                    subject_type=subject_type,
+                    subject_id=user_id,
+                    token_hash=token_hash,
+                    role=role,
+                    agency_id=getattr(user, "agency_id", None),
+                )
+            except Exception as e:
+                logger.warning("Falha ao registrar nova sessão após troca de senha: %s", e)
 
         return {
             "message": "Senha alterada com sucesso.",
