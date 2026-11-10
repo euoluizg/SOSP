@@ -32,6 +32,12 @@ BEGIN;
   END;
   $$;
   
+  -- -----------------------------------------------------------------------------
+  -- 3. SCHEMA DE SEGURANÇA E AUTENTICAÇÃO DE MENOR PRIVILÉGIO
+  -- -----------------------------------------------------------------------------
+  CREATE SCHEMA IF NOT EXISTS sosp_security;
+  REVOKE ALL ON SCHEMA sosp_security FROM PUBLIC;
+
   -- =============================================================================
   -- MÓDULO 1: ACCOUNTS
   -- =============================================================================
@@ -112,9 +118,11 @@ BEGIN;
     createdAt           timestamptz NOT NULL DEFAULT now(),
     updatedAt           timestamptz NOT NULL DEFAULT now(),
     deletedAt           timestamptz,
-    CONSTRAINT chkAccountsInternalUserRole CHECK (role IN ('administrator', 'servant')),
-    CONSTRAINT chkAccountsInternalUserCpf CHECK (cpf ~ '^[0-9]{11}$'),
-    CONSTRAINT chkAccountsInternalUserRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9]{1,20}$')
+    CONSTRAINT chkAccountsInternalCpf CHECK (cpf ~ '^[0-9]{11}$'),
+    CONSTRAINT chkAccountsInternalEmail CHECK (email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+    CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant')),
+    CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$'),
+    CONSTRAINT chkAccountsInternalName CHECK (char_length(fullName) >= 3)
   );
   
   CREATE UNIQUE INDEX uqAccountsInternalUserCpf ON accountsInternalUser (cpf) WHERE deletedAt IS NULL;
@@ -187,8 +195,8 @@ BEGIN;
     expiresAt   timestamptz NOT NULL,
     revokedAt   timestamptz,
     createdAt   timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chkAccountsSessionSubjectType CHECK (subjectType IN ('citizen', 'internal')),
-    CONSTRAINT uqAccountsSessionToken UNIQUE (tokenHash)
+    CONSTRAINT uqAccountsSessionToken UNIQUE (tokenHash),
+    CONSTRAINT chkAccountsSessionSubject CHECK (subjectType IN ('citizen', 'internal'))
   );
   
   CREATE INDEX idxAccountsSessionSubject ON accountsSession (subjectType, subjectId);

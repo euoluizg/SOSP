@@ -174,6 +174,9 @@ if not DB_HMAC_SECRET_KEY and REPOSITORY_BACKEND == "orm":
         "de no mínimo 32 caracteres é obrigatória para proteção de contexto RLS no PostgreSQL."
     )
 
+# Política de obrigatoriedade de sessão registrada em accountsSession (RN-28 / Fail-Closed)
+REQUIRE_REGISTERED_SESSION = os.environ.get("REQUIRE_REGISTERED_SESSION", "false").strip().lower() in ("true", "1", "yes")
+
 # Autenticação e Hasher Argon2id (RF-01, RF-02, ADR-003)
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.Argon2PasswordHasher",

@@ -242,41 +242,63 @@ class CitizenInMemoryRepository:
         return False
 
     # --- Gestão de Sessões e Revogação (accountsSession) ---
-    def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
+    def create_session(
+        self,
+        subject_type: str,
+        subject_id: str,
+        token_hash: str,
+        ip_address: str = None,
+        user_agent: str = None,
+        expires_at: datetime.datetime = None,
+        role: str = None,
+        agency_id: str = None,
+    ) -> None:
         if not hasattr(self, "_sessions"):
             self._sessions = {}
+        norm_subject_type = "citizen" if subject_type in ("citizen", "cidadao") else "internal"
         self._sessions[token_hash] = {
-            "subject_type": subject_type,
+            "subject_type": norm_subject_type,
             "subject_id": str(subject_id),
             "token_hash": token_hash,
             "ip_address": ip_address,
             "user_agent": user_agent,
             "expires_at": expires_at,
             "revoked_at": None,
+            "role": role,
+            "agency_id": agency_id,
         }
 
     def is_session_revoked(self, token_hash: str) -> bool:
+        from django.conf import settings
         if not hasattr(self, "_sessions"):
-            return False
+            self._sessions = {}
         sess = self._sessions.get(token_hash)
         if not sess:
+            if getattr(settings, "REQUIRE_REGISTERED_SESSION", False):
+                return True
             return False
         return sess.get("revoked_at") is not None
 
-    def revoke_session(self, token_hash: str) -> None:
+    def revoke_session(self, token_hash: str) -> bool:
         if not hasattr(self, "_sessions"):
-            return
-        if token_hash in self._sessions:
-            self._sessions[token_hash]["revoked_at"] = datetime.datetime.now(datetime.timezone.utc)
+            self._sessions = {}
+        sess = self._sessions.get(token_hash)
+        if sess and sess.get("revoked_at") is None:
+            sess["revoked_at"] = datetime.datetime.now(datetime.timezone.utc)
+            return True
+        return False
 
-    def revoke_all_sessions(self, subject_id: str) -> None:
+    def revoke_all_sessions(self, subject_id: str, role: str = None) -> int:
         if not hasattr(self, "_sessions"):
-            return
+            self._sessions = {}
         now = datetime.datetime.now(datetime.timezone.utc)
         sub_str = str(subject_id)
+        count = 0
         for s in self._sessions.values():
-            if s.get("subject_id") == sub_str:
+            if s.get("subject_id") == sub_str and s.get("revoked_at") is None:
                 s["revoked_at"] = now
+                count += 1
+        return count
 
 class CitizenDjangoORMRepository:
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
@@ -632,52 +654,63 @@ class CitizenDjangoORMRepository:
             )
 
     # --- Gestão de Sessões e Revogação (accountsSession) ---
-    def create_session(self, subject_type: str, subject_id: str, token_hash: str, ip_address: str = None, user_agent: str = None, expires_at: datetime.datetime = None) -> None:
+    def create_session(
+        self,
+        subject_type: str,
+        subject_id: str,
+        token_hash: str,
+        ip_address: str = None,
+        user_agent: str = None,
+        expires_at: datetime.datetime = None,
+        role: str = None,
+        agency_id: str = None,
+    ) -> None:
         from .models import Session
         from django.utils import timezone
         from common.security.db_context import db_security_context
         from common.security.authentication import SospUser
 
+        norm_subject_type = "citizen" if subject_type in ("citizen", "cidadao") else "internal"
+        role_for_context = role or ("citizen" if norm_subject_type == "citizen" else "server")
         exp = expires_at or (timezone.now() + datetime.timedelta(minutes=30))
-        try:
-            with db_security_context(user=SospUser(user_id=subject_id, role=subject_type)):
-                Session.objects.create(
-                    subject_type=subject_type,
-                    subject_id=subject_id,
-                    token_hash=token_hash,
-                    ip_address=ip_address,
-                    user_agent=(user_agent or "")[:500],
-                    expires_at=exp,
-                )
-        except Exception:
-            # Em modo SQLite ou testes sem tabela Session, prossegue com degradação suave
-            pass
+
+        with db_security_context(user=SospUser(user_id=subject_id, role=role_for_context, agency_id=agency_id)):
+            Session.objects.create(
+                subject_type=norm_subject_type,
+                subject_id=subject_id,
+                token_hash=token_hash,
+                ip_address=ip_address,
+                user_agent=(user_agent or "")[:500],
+                expires_at=exp,
+            )
 
     def is_session_revoked(self, token_hash: str) -> bool:
         from .models import Session
-        try:
-            sess = Session.objects.filter(token_hash=token_hash).first()
-            if not sess:
-                return False
-            return sess.revoked_at is not None
-        except Exception:
+        from django.conf import settings
+
+        sess = Session.objects.filter(token_hash=token_hash).first()
+        if not sess:
+            if getattr(settings, "REQUIRE_REGISTERED_SESSION", False):
+                return True
             return False
+        return sess.revoked_at is not None
 
-    def revoke_session(self, token_hash: str) -> None:
+    def revoke_session(self, token_hash: str) -> bool:
         from .models import Session
         from django.utils import timezone
-        try:
-            Session.objects.filter(token_hash=token_hash).update(revoked_at=timezone.now())
-        except Exception:
-            pass
 
-    def revoke_all_sessions(self, subject_id: str) -> None:
+        updated = Session.objects.filter(token_hash=token_hash, revoked_at__isnull=True).update(revoked_at=timezone.now())
+        return updated > 0
+
+    def revoke_all_sessions(self, subject_id: str, role: str = None) -> int:
         from .models import Session
         from django.utils import timezone
-        try:
-            Session.objects.filter(subject_id=subject_id, revoked_at__isnull=True).update(revoked_at=timezone.now())
-        except Exception:
-            pass
+        from common.security.db_context import db_security_context
+        from common.security.authentication import SospUser
+
+        role_for_context = role or "superadmin"
+        with db_security_context(user=SospUser(user_id=subject_id, role=role_for_context)):
+            return Session.objects.filter(subject_id=subject_id, revoked_at__isnull=True).update(revoked_at=timezone.now())
 
     def _to_dict(self, c) -> Dict[str, Any]:
         return {

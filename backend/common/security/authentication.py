@@ -247,11 +247,19 @@ class SospTokenAuthentication(BaseAuthentication):
                     clear_db_security_context()
                 except Exception:
                     pass
-                raise AuthenticationFailed("Sessão revogada no servidor. Faça login novamente.")
+                raise AuthenticationFailed("Sessão revogada ou inválida no servidor. Faça login novamente.")
         except AuthenticationFailed:
             raise
         except Exception as e:
-            logger.debug("Verificação de revogação de sessão ignorada: %s", e)
+            if getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm":
+                logger.error("Falha ao verificar revogação de sessão no banco (Fail-Closed): %s", e)
+                try:
+                    from common.security.db_context import clear_db_security_context
+                    clear_db_security_context()
+                except Exception:
+                    pass
+                raise AuthenticationFailed("Falha de segurança ao validar sessão no servidor.")
+            logger.debug("Verificação de revogação de sessão ignorada em modo não-ORM: %s", e)
 
         # 3. Re-validação de status no banco sob o próprio contexto RLS do usuário (anti-stale claims)
         try:

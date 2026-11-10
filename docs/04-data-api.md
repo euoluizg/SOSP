@@ -554,9 +554,11 @@ CREATE TABLE accountsInternalUser (
   createdAt           timestamptz NOT NULL DEFAULT now(),
   updatedAt           timestamptz NOT NULL DEFAULT now(),
   deletedAt           timestamptz,
-  CONSTRAINT chkAccountsInternalUserRole CHECK (role IN ('administrator', 'servant')),
-  CONSTRAINT chkAccountsInternalUserCpf CHECK (cpf ~ '^[0-9]{11}$'),
-  CONSTRAINT chkAccountsInternalUserRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9]{1,20}$')
+  CONSTRAINT chkAccountsInternalCpf CHECK (cpf ~ '^[0-9]{11}$'),
+  CONSTRAINT chkAccountsInternalEmail CHECK (email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+  CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant')),
+  CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$'),
+  CONSTRAINT chkAccountsInternalName CHECK (char_length(fullName) >= 3)
 );
 
 CREATE UNIQUE INDEX uqAccountsInternalUserCpf ON accountsInternalUser (cpf) WHERE deletedAt IS NULL;

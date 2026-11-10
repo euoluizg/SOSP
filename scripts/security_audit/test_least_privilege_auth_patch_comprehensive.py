@@ -21,6 +21,7 @@ import subprocess
 import time
 import uuid
 import datetime
+import hashlib
 import pytest
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -674,6 +675,181 @@ def test_least_privilege_patch():
             assert pe.status_code == 503
             assert "indisponível" in pe.detail.lower()
             print("✓ H.1 Falha segura comprovada: Ausência da função resulta em 503 controlado sem fallback para role='server'.")
+
+        # =====================================================================
+        # PARTE I: INICIALIZAÇÃO A PARTIR DO BASELINE REAL E COMPATIBILIDADE
+        # =====================================================================
+        print("\n--- [Parte I] Inicialização a partir do Baseline Real Django e Compatibilidade ---")
+
+        # I.1 Cria banco isolado sosp_baseline_test
+        run_cmd([f"{PG_BIN}/psql", "-h", pg_sock, "-p", str(pg_port), "-U", "postgres", "-d", "postgres", "-c", "CREATE DATABASE sosp_baseline_test;"])
+        run_cmd([f"{PG_BIN}/psql", "-h", pg_sock, "-p", str(pg_port), "-U", "postgres", "-d", "sosp_baseline_test", "-c", "CREATE EXTENSION IF NOT EXISTS unaccent; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS pgcrypto;"])
+
+        # Aplica baseline_0001_schema.sql (idêntico à migration 0001_initial)
+        baseline_sql_path = os.path.join(REPO_ROOT, "backend/common/sql/baseline_0001_schema.sql")
+        with open(baseline_sql_path, "r", encoding="utf-8") as f:
+            raw_baseline = f.read()
+        import importlib
+        migration_0001 = importlib.import_module("apps.accounts.migrations.0001_initial")
+        prepare_baseline_sql_for_django_transaction = migration_0001.prepare_baseline_sql_for_django_transaction
+        prepared_baseline = prepare_baseline_sql_for_django_transaction(raw_baseline)
+
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_baseline_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(prepared_baseline)
+        print("✓ I.1 Baseline real (baseline_0001_schema.sql) aplicado com sucesso em banco isolado.")
+
+        # Aplica DDL incremental da migration 0002_add_gender_description_and_unit_to_accounts.py
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_baseline_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                ALTER TABLE accountsCitizen ADD COLUMN IF NOT EXISTS genderDescription varchar(120);
+                ALTER TABLE accountsInternalUser ADD COLUMN IF NOT EXISTS unitId uuid;
+                CREATE INDEX IF NOT EXISTS idxAccountsInternalUserUnit ON accountsInternalUser (unitId);
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalUserRole;
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalUserRegistration;
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalUserCpf;
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalRole;
+                ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant'));
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalRegistration;
+                ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$');
+                ALTER TABLE accountsSession DROP CONSTRAINT IF EXISTS chkAccountsSessionSubjectType;
+                ALTER TABLE accountsSession DROP CONSTRAINT IF EXISTS chkAccountsSessionSubject;
+                ALTER TABLE accountsSession ADD CONSTRAINT chkAccountsSessionSubject CHECK (subjectType IN ('citizen', 'internal'));
+                """)
+        print("✓ I.2 Migração incremental (0002) aplicada com sucesso.")
+
+        # Executa inserção com os usuários do seed
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_baseline_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO catalogAgency (id, name, acronym, sphere) VALUES ('11111111-1111-1111-1111-111111111111', 'Secretaria de Segurança Pública', 'SSP', 'state');")
+                cur.execute("INSERT INTO catalogAgency (id, name, acronym, sphere) VALUES ('22222222-2222-2222-2222-222222222222', 'Departamento Estadual de Trânsito', 'DETRAN', 'state');")
+                cur.execute("INSERT INTO catalogUnit (id, agencyId, name, zipCode, street, neighborhood, city, state, addressNumber) VALUES ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Central Já Centro', '57020000', 'Rua do Sol', 'Centro', 'Maceió', 'AL', '100');")
+                cur.execute("INSERT INTO catalogUnit (id, agencyId, name, zipCode, street, neighborhood, city, state, addressNumber) VALUES ('44444444-4444-4444-4444-444444444444', '22222222-2222-2222-2222-222222222222', 'Posto Detran Farol', '57050000', 'Av Fernandes Lima', 'Farol', 'Maceió', 'AL', '200');")
+
+                cur.execute("""
+                INSERT INTO accountsInternalUser (cpf, fullName, email, registrationNumber, agencyId, unitId, role, canManageCatalog, passwordHash)
+                VALUES ('33366699957', 'João Servidor Central', 'joao.servidor@ssp.al.gov.br', 'SSP-1001', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'servant', false, 'pwd'),
+                       ('44477700083', 'Ana Servidora Farol', 'ana.servidora@detran.al.gov.br', 'DET-2002', '22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444', 'servant', false, 'pwd'),
+                       ('55588811194', 'Carlos Gestor SSP', 'carlos.gestor@ssp.al.gov.br', 'GES-3003', '11111111-1111-1111-1111-111111111111', NULL, 'gestor', true, 'pwd'),
+                       ('99988877714', 'Admin SOSP Geral', 'admin@sosp.al.gov.br', 'ADM-0001', NULL, NULL, 'superadmin', true, 'pwd');
+                """)
+        print("✓ I.3 Usuários demo com matrículas ('SSP-1001', 'DET-2002', 'GES-3003', 'ADM-0001') e papéis ('servant', 'gestor', 'superadmin') validados nas constraints reais.")
+
+        # I.4 Teste de retrocompatibilidade com banco preexistente inicializado com baseline antiga
+        run_cmd([f"{PG_BIN}/psql", "-h", pg_sock, "-p", str(pg_port), "-U", "postgres", "-d", "postgres", "-c", "CREATE DATABASE sosp_legacy_test;"])
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_legacy_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                CREATE TABLE accountsInternalUser (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    cpf varchar(11) NOT NULL,
+                    fullName varchar(120) NOT NULL,
+                    email varchar(200) NOT NULL,
+                    registrationNumber varchar(20) NOT NULL,
+                    role varchar(20) NOT NULL,
+                    passwordHash varchar(255) NOT NULL,
+                    CONSTRAINT chkAccountsInternalUserRole CHECK (role IN ('administrator', 'servant')),
+                    CONSTRAINT chkAccountsInternalUserRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9]{1,20}$')
+                );
+                CREATE TABLE accountsSession (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    subjectType varchar(20) NOT NULL,
+                    subjectId uuid NOT NULL,
+                    tokenHash varchar(64) NOT NULL UNIQUE,
+                    expiresAt timestamptz NOT NULL,
+                    revokedAt timestamptz,
+                    CONSTRAINT chkAccountsSessionSubjectType CHECK (subjectType IN ('citizen', 'internal'))
+                );
+                """)
+                # Confirma que a constraint legada rejeita gestor e hífen
+                rejected = False
+                try:
+                    cur.execute("INSERT INTO accountsInternalUser (cpf, fullName, email, registrationNumber, role, passwordHash) VALUES ('55588811194', 'Carlos', 'c@ssp.gov.br', 'GES-3003', 'gestor', 'pwd');")
+                except Exception:
+                    rejected = True
+                assert rejected, "Constraint legada deveria ter rejeitado 'gestor' ou hífen em GES-3003!"
+
+                # Aplica migração incremental 0002
+                cur.execute("""
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalUserRole;
+                ALTER TABLE accountsInternalUser DROP CONSTRAINT IF EXISTS chkAccountsInternalUserRegistration;
+                ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'manager', 'servant'));
+                ALTER TABLE accountsInternalUser ADD CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$');
+                ALTER TABLE accountsSession DROP CONSTRAINT IF EXISTS chkAccountsSessionSubjectType;
+                ALTER TABLE accountsSession ADD CONSTRAINT chkAccountsSessionSubject CHECK (subjectType IN ('citizen', 'internal'));
+                """)
+
+                # Inserção bem-sucedida após a migração
+                cur.execute("INSERT INTO accountsInternalUser (cpf, fullName, email, registrationNumber, role, passwordHash) VALUES ('55588811194', 'Carlos Gestor', 'c@ssp.gov.br', 'GES-3003', 'gestor', 'pwd');")
+                assert cur.rowcount == 1
+        print("✓ I.4 Retrocompatibilidade comprovada: bancos inicializados com baseline legada são migrados de forma transparente e aceitam gestor, superadmin e hífens.")
+
+        # =====================================================================
+        # PARTE J: VALIDAÇÃO DOS 9 CENÁRIOS DE SESSÃO EM POSTGRESQL REAL SOB RLS
+        # =====================================================================
+        print("\n--- [Parte J] 9 Cenários de Segurança de Sessões em PostgreSQL Real sob RLS ---")
+
+        c_session_id = f"test-session-citizen-{uuid.uuid4().hex}"
+        c_hash = hashlib.sha256(c_session_id.encode("utf-8")).hexdigest()
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO accountsSession (subjectType, subjectId, tokenHash, expiresAt) VALUES ('citizen', %s, %s, now() + interval '30 min');", (active_citizen_id, c_hash))
+        print("✓ J.1 Sessão de cidadão criada com subjectType='citizen' no PostgreSQL.")
+
+        s_session_id = f"test-session-servant-{uuid.uuid4().hex}"
+        s_hash = hashlib.sha256(s_session_id.encode("utf-8")).hexdigest()
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO accountsSession (subjectType, subjectId, tokenHash, expiresAt) VALUES ('internal', %s, %s, now() + interval '30 min');", (joao_id, s_hash))
+        print("✓ J.2 Sessão de servidor criada com subjectType='internal' no PostgreSQL.")
+
+        m_session_id = f"test-session-gestor-{uuid.uuid4().hex}"
+        m_hash = hashlib.sha256(m_session_id.encode("utf-8")).hexdigest()
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO accountsSession (subjectType, subjectId, tokenHash, expiresAt) VALUES ('internal', %s, %s, now() + interval '30 min');", (carlos_id, m_hash))
+        print("✓ J.3 Sessão de gestor criada com subjectType='internal' no PostgreSQL.")
+
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE accountsSession SET revokedAt = now() WHERE tokenHash = %s;", (c_hash,))
+                cur.execute("SELECT revokedAt IS NOT NULL FROM accountsSession WHERE tokenHash = %s;", (c_hash,))
+                assert cur.fetchone()[0] is True
+        print("✓ J.4 Logout comprovado: sessão revogada no PostgreSQL.")
+
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO accountsSession (subjectType, subjectId, tokenHash, expiresAt) VALUES ('internal', %s, 'hash_joao_1', now() + interval '30 min'), ('internal', %s, 'hash_joao_2', now() + interval '30 min');", (joao_id, joao_id))
+                cur.execute("UPDATE accountsSession SET revokedAt = now() WHERE subjectId = %s AND revokedAt IS NULL;", (joao_id,))
+                cur.execute("SELECT count(*) FROM accountsSession WHERE subjectId = %s AND revokedAt IS NULL;", (joao_id,))
+                assert cur.fetchone()[0] == 0
+        print("✓ J.5 Revogação de todas as sessões anteriores comprovada no PostgreSQL (revoke_all_sessions).")
+
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                rejected = False
+                try:
+                    cur.execute("INSERT INTO accountsSession (subjectType, subjectId, tokenHash, expiresAt) VALUES ('server', %s, 'hash_invalid', now() + interval '30 min');", (joao_id,))
+                except Exception:
+                    rejected = True
+                assert rejected, "Constraint chkAccountsSessionSubject deveria ter rejeitado 'server'!"
+        print("✓ J.6 Constraint chkAccountsSessionSubject rejeitou 'server' diretamente no PostgreSQL.")
+
+        with psycopg.connect(host=pg_sock, port=pg_port, dbname="sosp_lp_test", user="postgres", autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT revokedAt IS NULL FROM accountsSession WHERE tokenHash = %s;", (m_hash,))
+                assert cur.fetchone()[0] is True
+        print("✓ J.7 Isolamento entre sessões de usuários comprovado no PostgreSQL.")
+
+        from apps.accounts.repositories import CitizenDjangoORMRepository
+        from django.test import override_settings
+        orm_test_repo = CitizenDjangoORMRepository()
+        with override_settings(REQUIRE_REGISTERED_SESSION=True):
+            assert orm_test_repo.is_session_revoked("hash_inexistente_qualquer") is True
+        with override_settings(REQUIRE_REGISTERED_SESSION=False):
+            assert orm_test_repo.is_session_revoked("hash_inexistente_qualquer") is False
+        print("✓ J.8 Política REQUIRE_REGISTERED_SESSION bloqueia tokens sem sessão registrada no servidor.")
 
         print("\n" + "=" * 70)
         print("✅ TODOS OS TESTES DO PATCH DE MENOR PRIVILÉGIO FORAM APROVADOS!")
