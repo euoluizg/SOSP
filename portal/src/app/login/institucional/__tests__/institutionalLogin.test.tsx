@@ -269,5 +269,48 @@ describe("Login Institucional (ADR-003, RN-35, RN-36)", () => {
       expect(screen.getByText(/senha institucional atualizada com sucesso!/i)).toBeInTheDocument();
     });
   });
+
+  it("deve fechar o pop-up e limpar sessão temporária do localStorage ao cancelar ou pressionar Escape", async () => {
+    const mockLogin = vi.mocked(apiClient.loginCitizen);
+    mockLogin.mockResolvedValueOnce({
+      token: "temp-jwt-token-admin",
+      tokenType: "Bearer",
+      expiresIn: 1800,
+      citizen: {
+        id: "admin-001",
+        fullName: "Admin SOSP Geral",
+        cpf: "99988877714",
+        email: "admin@sosp.al.gov.br",
+        role: "superadmin",
+        mustChangePassword: true,
+      },
+    });
+
+    render(<InstitutionalLoginPage />);
+
+    fireEvent.change(screen.getByLabelText(/cpf do servidor ou gestor/i), {
+      target: { value: "999.888.777-14" },
+    });
+    fireEvent.change(screen.getByLabelText(/senha institucional/i), {
+      target: { value: "AdminSosp@2026!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /acessar painel institucional/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem("sosp_auth_token")).toBe("temp-jwt-token-admin");
+    expect(localStorage.getItem("sosp_user")).toContain("Admin SOSP Geral");
+
+    fireEvent.click(screen.getByRole("button", { name: /cancelar e voltar para o login/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem("sosp_auth_token")).toBeNull();
+    expect(localStorage.getItem("sosp_user")).toBeNull();
+  });
 });
 

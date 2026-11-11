@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { ApiClient } from "../apiClient";
 
 describe("ApiClient Services & Mocks (Contratos, RN-05, RN-18, RN-20)", () => {
@@ -76,6 +76,66 @@ describe("ApiClient Services & Mocks (Contratos, RN-05, RN-18, RN-20)", () => {
     });
     expect(updated.name).toBe("Departamento Estadual de Trânsito Atualizado");
     expect(updated.acronym).toBe("DETRAN-AL");
+  });
+
+  describe("Limpeza de sessão em erro 401 (RN-28)", () => {
+    const originalLocation = window.location;
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+      localStorage.clear();
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    });
+
+    it("deve remover sosp_auth_token e sosp_user e redirecionar conta institucional para /sessao-expirada?tipo=institucional", async () => {
+      vi.resetModules();
+      vi.stubEnv("NEXT_PUBLIC_API_MOCK", "false");
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "https://api.sosp.test/api/v1");
+
+      localStorage.setItem("sosp_auth_token", "expired-jwt");
+      localStorage.setItem(
+        "sosp_user",
+        JSON.stringify({ id: "admin-1", fullName: "Admin SOSP", role: "superadmin" })
+      );
+
+      let assignedHref = "";
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: {
+          pathname: "/admin/orgaos",
+          get href() {
+            return assignedHref;
+          },
+          set href(val: string) {
+            assignedHref = val;
+          },
+        },
+      });
+
+      const fetchMock = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          type: "https://sosp.al.gov.br/errors/401",
+          title: "Não autenticado",
+          status: 401,
+          detail: "Sessão expirada por inatividade.",
+        }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const { ApiClient: LiveApiClient } = await import("../apiClient");
+
+      await expect(LiveApiClient.getAgencies()).rejects.toMatchObject({ status: 401 });
+      expect(localStorage.getItem("sosp_auth_token")).toBeNull();
+      expect(localStorage.getItem("sosp_user")).toBeNull();
+      expect(assignedHref).toBe("/sessao-expirada?tipo=institucional");
+    });
   });
 });
 
