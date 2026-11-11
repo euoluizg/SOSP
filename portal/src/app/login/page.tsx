@@ -10,6 +10,13 @@ import { GovbrModal } from "@/components/features/auth/GovbrModal";
 import { maskCPF } from "@/utils/masks";
 import { isValidCPF, sanitizeRedirectUrl } from "@/utils/validations";
 import { loginCitizen } from "@/services/apiClient";
+import {
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+  MANAGER_ROLES,
+  notifyAuthSessionUpdated,
+  SERVER_ROLES,
+} from "@/utils/session";
 import type { ProblemDetails } from "@/types/api";
 
 function LoginContent() {
@@ -67,18 +74,16 @@ function LoginContent() {
       const res = await loginCitizen(cpf, password);
       setFailedAttempts(0);
       if (typeof window !== "undefined") {
-        localStorage.setItem("sosp_auth_token", res.token);
-        localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
+        localStorage.setItem(AUTH_TOKEN_KEY, res.token);
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(res.citizen));
+        notifyAuthSessionUpdated();
       }
+      const userRole = res.citizen?.role;
       if (safeRedirect) {
         router.push(safeRedirect);
-      } else if (res.citizen?.role === "server") {
+      } else if (userRole && (SERVER_ROLES as readonly string[]).includes(userRole)) {
         router.push("/servidor/painel");
-      } else if (
-        res.citizen?.role === "gestor" ||
-        res.citizen?.role === "admin" ||
-        res.citizen?.role === "superadmin"
-      ) {
+      } else if (userRole && (MANAGER_ROLES as readonly string[]).includes(userRole)) {
         router.push("/admin/orgaos");
       } else {
         router.push("/cidadao/meus-agendamentos");

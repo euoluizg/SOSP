@@ -5,6 +5,15 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
 import { User, LogOut, Menu, X } from "lucide-react";
+import {
+  AUTH_TOKEN_KEY,
+  clearAuthSessionStorage,
+  getStoredUserSession,
+  MANAGER_ROLES,
+  SERVER_ROLES,
+  SESSION_CLEARED_EVENT,
+  SESSION_UPDATED_EVENT,
+} from "@/utils/session";
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
@@ -14,25 +23,35 @@ export const Header: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("sosp_user");
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          setUserName(parsed.fullName ? parsed.fullName.split(" ")[0] : "Usuário");
-          setUserRole(parsed.role || "citizen");
-        } catch {
-          // ignore parsing error
-        }
+    const syncUserFromStorage = () => {
+      if (typeof window === "undefined") return;
+
+      const token = localStorage.getItem(AUTH_TOKEN_KEY);
+      const parsed = getStoredUserSession();
+      if (!token || !parsed || pathname === "/sessao-expirada" || parsed.mustChangePassword) {
+        setUserName(null);
+        setUserRole(null);
+        return;
       }
-    }
+
+      setUserName(parsed.fullName ? parsed.fullName.split(" ")[0] : "Usuário");
+      setUserRole(parsed.role || "citizen");
+    };
+
+    syncUserFromStorage();
+    window.addEventListener(SESSION_CLEARED_EVENT, syncUserFromStorage);
+    window.addEventListener(SESSION_UPDATED_EVENT, syncUserFromStorage);
+    window.addEventListener("storage", syncUserFromStorage);
+
+    return () => {
+      window.removeEventListener(SESSION_CLEARED_EVENT, syncUserFromStorage);
+      window.removeEventListener(SESSION_UPDATED_EVENT, syncUserFromStorage);
+      window.removeEventListener("storage", syncUserFromStorage);
+    };
   }, [pathname]);
 
   const handleLogout = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("sosp_auth_token");
-      localStorage.removeItem("sosp_user");
-    }
+    clearAuthSessionStorage();
     setUserName(null);
     setUserRole(null);
     router.push("/");
@@ -96,7 +115,7 @@ export const Header: React.FC = () => {
                 <User className="w-4 h-4 text-[#1351B4]" />
                 Olá, {userName}
               </span>
-              {userRole === "server" && (
+              {userRole && (SERVER_ROLES as readonly string[]).includes(userRole) && (
                 <Link
                   href="/servidor/painel"
                   className="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded hover:bg-amber-200 transition-colors"
@@ -104,7 +123,7 @@ export const Header: React.FC = () => {
                   Painel Servidor
                 </Link>
               )}
-              {(userRole === "gestor" || userRole === "admin" || userRole === "superadmin") && (
+              {userRole && (MANAGER_ROLES as readonly string[]).includes(userRole) && (
                 <Link
                   href="/admin/orgaos"
                   className="text-xs font-bold bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded hover:bg-indigo-200 transition-colors"

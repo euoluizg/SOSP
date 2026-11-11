@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -19,6 +19,14 @@ import { Input } from "@/components/ui/Input";
 import { maskCPF } from "@/utils/masks";
 import { isValidCPF, sanitizeRedirectUrl } from "@/utils/validations";
 import { loginCitizen, changePassword } from "@/services/apiClient";
+import {
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+  clearAuthSessionStorage,
+  isInstitutionalRole,
+  notifyAuthSessionUpdated,
+  SERVER_ROLES,
+} from "@/utils/session";
 import type { ProblemDetails, UserSession } from "@/types/api";
 
 function InstitutionalLoginContent() {
@@ -58,6 +66,29 @@ function InstitutionalLoginContent() {
     return () => clearInterval(interval);
   }, [lockoutSeconds]);
 
+  const handleCancelPasswordModal = useCallback(() => {
+    if (isChangingPassword || changePasswordSuccess) return;
+    setMustChangePasswordMode(false);
+    setAuthenticatedUser(null);
+    setCurrentPasswordForChange("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setFormError(null);
+    setChangePasswordError(null);
+    clearAuthSessionStorage();
+  }, [isChangingPassword, changePasswordSuccess]);
+
+  useEffect(() => {
+    if (!mustChangePasswordMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        handleCancelPasswordModal();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mustChangePasswordMode, handleCancelPasswordModal]);
+
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCpf(maskCPF(e.target.value));
     if (formError) setFormError(null);
@@ -88,16 +119,17 @@ function InstitutionalLoginContent() {
 
       // Validação estrita de perfil institucional antes de iniciar sessão (RN-35, RN-36, ADR-003)
       const role = res.citizen?.role;
-      const allowedRoles = ["server", "servant", "gestor", "manager", "admin", "superadmin"];
 
       if (role === "citizen") {
+        clearAuthSessionStorage();
         setFormError(
           "Esta conta possui perfil de Cidadão. Por favor, acesse o portal do cidadão."
         );
         return;
       }
 
-      if (!role || !allowedRoles.includes(role)) {
+      if (!isInstitutionalRole(role)) {
+        clearAuthSessionStorage();
         setFormError(
           "Perfil de acesso institucional não reconhecido ou sem permissão de acesso a este painel."
         );
@@ -112,21 +144,23 @@ function InstitutionalLoginContent() {
         setAuthenticatedUser(res.citizen);
         setCurrentPasswordForChange(password);
         if (typeof window !== "undefined") {
-          localStorage.setItem("sosp_auth_token", res.token);
-          localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
+          localStorage.setItem(AUTH_TOKEN_KEY, res.token);
+          localStorage.setItem(AUTH_USER_KEY, JSON.stringify(res.citizen));
+          notifyAuthSessionUpdated();
         }
         return;
       }
 
       // Sessão regular estabelecida
       if (typeof window !== "undefined") {
-        localStorage.setItem("sosp_auth_token", res.token);
-        localStorage.setItem("sosp_user", JSON.stringify(res.citizen));
+        localStorage.setItem(AUTH_TOKEN_KEY, res.token);
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(res.citizen));
+        notifyAuthSessionUpdated();
       }
 
       if (safeRedirect) {
         router.push(safeRedirect);
-      } else if (role === "server" || role === "servant") {
+      } else if (role && (SERVER_ROLES as readonly string[]).includes(role)) {
         router.push("/servidor/painel");
       } else {
         // gestor, manager, admin, superadmin
@@ -193,20 +227,21 @@ function InstitutionalLoginContent() {
       const role = authenticatedUser?.role;
       if (typeof window !== "undefined") {
         if (res.token) {
-          localStorage.setItem("sosp_auth_token", res.token);
+          localStorage.setItem(AUTH_TOKEN_KEY, res.token);
         }
         if (authenticatedUser) {
           localStorage.setItem(
-            "sosp_user",
+            AUTH_USER_KEY,
             JSON.stringify({ ...authenticatedUser, mustChangePassword: false })
           );
         }
+        notifyAuthSessionUpdated();
       }
 
       setTimeout(() => {
         if (safeRedirect) {
           router.push(safeRedirect);
-        } else if (role === "server" || role === "servant") {
+        } else if (role && (SERVER_ROLES as readonly string[]).includes(role)) {
           router.push("/servidor/painel");
         } else {
           router.push("/admin/orgaos");
@@ -409,12 +444,9 @@ function InstitutionalLoginContent() {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setMustChangePasswordMode(false);
-                  setFormError(null);
-                  setChangePasswordError(null);
-                }}
-                className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-slate-200/50 transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+                onClick={handleCancelPasswordModal}
+                disabled={isChangingPassword || !!changePasswordSuccess}
+                className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-slate-200/50 transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center disabled:opacity-50"
                 aria-label="Fechar pop-up e voltar ao login"
               >
                 <span className="text-xl font-bold leading-none">&times;</span>
@@ -556,12 +588,9 @@ function InstitutionalLoginContent() {
               <div className="mt-4 pt-4 border-t border-gray-100 text-center">
                 <button
                   type="button"
-                  onClick={() => {
-                    setMustChangePasswordMode(false);
-                    setFormError(null);
-                    setChangePasswordError(null);
-                  }}
-                  className="text-xs font-semibold text-gray-500 hover:text-gray-700 cursor-pointer min-h-[44px] inline-flex items-center"
+                  onClick={handleCancelPasswordModal}
+                  disabled={isChangingPassword || !!changePasswordSuccess}
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-700 cursor-pointer min-h-[44px] inline-flex items-center disabled:opacity-50"
                 >
                   Cancelar e voltar para o login
                 </button>

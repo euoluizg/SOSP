@@ -1,5 +1,12 @@
 import { Agency, Appointment, AppointmentSlot, CitizenProfile, LoginResponse, ProblemDetails, Protocol, Service, Unit, UserSession } from "@/types/api";
 import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
+import {
+  AUTH_TOKEN_KEY,
+  clearAuthSessionStorage,
+  getStoredUserSession,
+  isInstitutionalPath,
+  isInstitutionalRole,
+} from "@/utils/session";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
@@ -12,7 +19,7 @@ export class ApiClient {
     const url = `${BASE_URL}${endpoint}`;
     let authToken = "";
     if (typeof window !== "undefined") {
-      authToken = localStorage.getItem("sosp_auth_token") || "";
+      authToken = localStorage.getItem(AUTH_TOKEN_KEY) || "";
     }
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -25,9 +32,17 @@ export class ApiClient {
       const res = await fetch(url, { ...options, headers });
       if (!res.ok) {
         if (res.status === 401 && typeof window !== "undefined") {
-          localStorage.removeItem("sosp_auth_token");
+          const storedUser = getStoredUserSession();
+          const wasInstitutional =
+            isInstitutionalRole(storedUser?.role) ||
+            isInstitutionalPath(window.location.pathname);
+
+          clearAuthSessionStorage();
+
           if (!window.location.pathname.includes("/login")) {
-            window.location.href = "/sessao-expirada";
+            window.location.href = wasInstitutional
+              ? "/sessao-expirada?tipo=institucional"
+              : "/sessao-expirada";
           }
         }
         let problem: ProblemDetails;
@@ -417,7 +432,7 @@ export class ApiClient {
   }
   static logout(): void {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("sosp_auth_token");
+      clearAuthSessionStorage();
       sessionStorage.clear();
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";
@@ -427,7 +442,7 @@ export class ApiClient {
 
   static getAuthToken(): string | null {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("sosp_auth_token");
+      return localStorage.getItem(AUTH_TOKEN_KEY);
     }
     return null;
   }
