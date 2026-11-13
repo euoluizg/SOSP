@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Users,
@@ -8,18 +8,17 @@ import {
   Clock,
   UserX,
   Search,
-  Calendar,
-  Filter,
   Check,
   Play,
   FileText,
-  Building,
   Shield,
-  ArrowRight,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
+import { getStoredUserSession } from "@/utils/session";
 
 interface QueueItem {
   id: string;
@@ -28,8 +27,10 @@ interface QueueItem {
   citizenName: string;
   citizenCpf: string;
   serviceName: string;
-  status: "waiting" | "in_progress" | "completed" | "no_show";
+  status: "waiting" | "in_progress" | "completed" | "no_show" | "cancelled";
 }
+
+const STORAGE_QUEUE_KEY = "sosp_server_queue_guiche04";
 
 const INITIAL_QUEUE: QueueItem[] = [
   {
@@ -93,32 +94,83 @@ export default function ServerDashboardPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [noShowItem, setNoShowItem] = useState<QueueItem | null>(null);
+  const [cancelItem, setCancelItem] = useState<QueueItem | null>(null);
+
+  // Dados do Servidor Logado sincronizados com a sessão
+  const [serverName, setServerName] = useState<string>("João Servidor Central");
+  const [serverMatricula, setServerMatricula] = useState<string>("SSP-1001");
+  const [serverLocation] = useState<string>("Maceió - AL");
+
+  // Carrega e sincroniza fila persistente e dados da sessão
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedQueue = localStorage.getItem(STORAGE_QUEUE_KEY);
+      if (storedQueue) {
+        try {
+          const parsed = JSON.parse(storedQueue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setQueue(parsed);
+          }
+        } catch (e) {
+          console.error("Erro ao carregar fila persistente:", e);
+        }
+      }
+
+      const session = getStoredUserSession();
+      if (session) {
+        if (session.fullName) {
+          setServerName(session.fullName);
+        }
+        if ((session as { registrationNumber?: string }).registrationNumber) {
+          setServerMatricula((session as { registrationNumber?: string }).registrationNumber || "SSP-1001");
+        }
+      }
+    }
+  }, []);
+
+  // Salva no localStorage para persistência definitiva (sem reset ao navegar ou atualizar)
+  const persistQueue = (updatedQueue: QueueItem[]) => {
+    setQueue(updatedQueue);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_QUEUE_KEY, JSON.stringify(updatedQueue));
+    }
+  };
 
   // Ações do Servidor
   const handleStartAttendance = (id: string) => {
-    setQueue((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, status: "in_progress" } : item
-      )
+    const updated = queue.map((item) =>
+      item.id === id ? { ...item, status: "in_progress" as const } : item
     );
+    persistQueue(updated);
   };
 
   const handleCompleteAttendance = (id: string) => {
-    setQueue((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, status: "completed" } : item
-      )
+    const updated = queue.map((item) =>
+      item.id === id ? { ...item, status: "completed" as const } : item
     );
+    persistQueue(updated);
   };
 
   const handleConfirmNoShow = () => {
     if (!noShowItem) return;
-    setQueue((prev) =>
-      prev.map((item) =>
-        item.id === noShowItem.id ? { ...item, status: "no_show" } : item
-      )
+    const updated = queue.map((item) =>
+      item.id === noShowItem.id ? { ...item, status: "no_show" as const } : item
     );
+    persistQueue(updated);
     setNoShowItem(null);
+  };
+
+  const handleConfirmCancel = () => {
+    if (!cancelItem) return;
+    const updated = queue.map((item) =>
+      item.id === cancelItem.id ? { ...item, status: "cancelled" as const } : item
+    );
+    persistQueue(updated);
+    setCancelItem(null);
+  };
+
+  const handleResetQueue = () => {
+    persistQueue(INITIAL_QUEUE);
   };
 
   // Filtragem da Fila
@@ -140,11 +192,12 @@ export default function ServerDashboardPage() {
   const waitingCount = queue.filter((i) => i.status === "waiting").length;
   const completedCount = queue.filter((i) => i.status === "completed").length;
   const noShowCount = queue.filter((i) => i.status === "no_show").length;
+  const cancelledCount = queue.filter((i) => i.status === "cancelled").length;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-[1200px] mx-auto">
-        {/* Header do Servidor */}
+        {/* Header do Servidor — Restrito ao painel designado sem acesso à Gestão Geral */}
         <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200 mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-blue-100 text-[#1351B4] rounded-2xl flex items-center justify-center font-bold text-xl">
@@ -158,7 +211,7 @@ export default function ServerDashboardPage() {
                 Central Já! Centro — Guichê 04
               </h1>
               <p className="text-xs text-gray-500 mt-0.5">
-                Atendente: <strong>Arthur Franco (Matrícula: 2026-9921)</strong> | Lotação: Maceió - AL
+                Atendente: <strong>{serverName} (Matrícula: {serverMatricula})</strong> | Lotação: {serverLocation}
               </p>
             </div>
           </div>
@@ -170,17 +223,20 @@ export default function ServerDashboardPage() {
                 Relatórios Operacionais
               </Button>
             </Link>
-            <Link href="/admin/orgaos">
-              <Button variant="tertiary" className="text-xs text-gray-600">
-                <Building className="w-4 h-4 mr-1.5" />
-                Gestão Geral
-              </Button>
-            </Link>
+            <Button
+              variant="tertiary"
+              className="text-xs text-gray-500 hover:text-gray-700"
+              onClick={handleResetQueue}
+              title="Restaurar fila inicial de demonstração"
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1" />
+              Restaurar Fila
+            </Button>
           </div>
         </div>
 
-        {/* 4 Cards de Métricas Operacionais */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* Cards de Métricas Operacionais */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-500 uppercase">Total Hoje</span>
@@ -234,6 +290,19 @@ export default function ServerDashboardPage() {
             </div>
             <span className="text-xs text-red-600/80 mt-1 block">Ausências registradas (RN-23)</span>
           </div>
+
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-500 uppercase">Cancelados</span>
+              <div className="w-8 h-8 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center">
+                <Ban className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl sm:text-3xl font-extrabold text-gray-700 mt-2">
+              {cancelledCount}
+            </div>
+            <span className="text-xs text-gray-400 mt-1 block">Atendimentos cancelados</span>
+          </div>
         </div>
 
         {/* Fila de Atendimento do Dia */}
@@ -244,7 +313,7 @@ export default function ServerDashboardPage() {
                 Fila de Atendimento do Expediente
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Controle de fluxo de cidadãos e registro de comparecimento
+                Controle de fluxo de cidadãos, registro de comparecimento e cancelamento permanente
               </p>
             </div>
 
@@ -271,6 +340,7 @@ export default function ServerDashboardPage() {
                 <option value="in_progress">Em Atendimento</option>
                 <option value="completed">Concluídos</option>
                 <option value="no_show">Não Compareceu</option>
+                <option value="cancelled">Cancelados</option>
               </select>
             </div>
           </div>
@@ -314,6 +384,8 @@ export default function ServerDashboardPage() {
                             ? "info"
                             : item.status === "no_show"
                             ? "danger"
+                            : item.status === "cancelled"
+                            ? "neutral"
                             : "warning"
                         }
                       >
@@ -323,6 +395,8 @@ export default function ServerDashboardPage() {
                           ? "Em Atendimento"
                           : item.status === "no_show"
                           ? "Não Compareceu"
+                          : item.status === "cancelled"
+                          ? "Cancelado"
                           : "Aguardando"}
                       </Tag>
                     </td>
@@ -342,20 +416,45 @@ export default function ServerDashboardPage() {
                             className="text-xs py-1.5 px-3"
                             onClick={() => setNoShowItem(item)}
                           >
-                            Falta
+                            Ausente
+                          </Button>
+                          <Button
+                            variant="tertiary"
+                            className="text-xs py-1.5 px-2.5 text-gray-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => setCancelItem(item)}
+                            title="Cancelar Agendamento"
+                          >
+                            Cancelar
                           </Button>
                         </div>
                       )}
 
                       {item.status === "in_progress" && (
-                        <Button
-                          variant="secondary"
-                          className="text-xs py-1.5 px-3 border-green-600 text-green-700 hover:bg-green-50"
-                          onClick={() => handleCompleteAttendance(item.id)}
-                        >
-                          <Check className="w-3.5 h-3.5 mr-1" />
-                          Concluir Atendimento
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="secondary"
+                            className="text-xs py-1.5 px-3 border-green-600 text-green-700 hover:bg-green-50"
+                            onClick={() => handleCompleteAttendance(item.id)}
+                          >
+                            <Check className="w-3.5 h-3.5 mr-1" />
+                            Concluir
+                          </Button>
+                          <Button
+                            variant="danger"
+                            className="text-xs py-1.5 px-3"
+                            onClick={() => setNoShowItem(item)}
+                          >
+                            Ausente
+                          </Button>
+                          <Button
+                            variant="tertiary"
+                            className="text-xs py-1.5 px-2.5 text-gray-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => setCancelItem(item)}
+                            title="Cancelar Agendamento"
+                          >
+                            Cancelar
+                          </Button>
+                        </div>
                       )}
 
                       {item.status === "completed" && (
@@ -369,6 +468,13 @@ export default function ServerDashboardPage() {
                         <span className="text-xs text-red-600 font-semibold inline-flex items-center">
                           <UserX className="w-3.5 h-3.5 mr-1" />
                           Ausente
+                        </span>
+                      )}
+
+                      {item.status === "cancelled" && (
+                        <span className="text-xs text-gray-500 font-semibold inline-flex items-center">
+                          <Ban className="w-3.5 h-3.5 mr-1" />
+                          Cancelado
                         </span>
                       )}
                     </td>
@@ -391,7 +497,18 @@ export default function ServerDashboardPage() {
         cancelText="Voltar"
         isDestructive={true}
       />
+
+      {/* Modal de Cancelamento de Atendimento */}
+      <CriticalConfirmationModal
+        isOpen={Boolean(cancelItem)}
+        onClose={() => setCancelItem(null)}
+        onConfirm={handleConfirmCancel}
+        title="Cancelar Atendimento"
+        description={`Deseja realmente cancelar o agendamento do cidadão ${cancelItem?.citizenName} (Protocolo ${cancelItem?.protocol})? Esta ação gravará o status de cancelamento permanente.`}
+        confirmText="Confirmar Cancelamento"
+        cancelText="Voltar"
+        isDestructive={true}
+      />
     </div>
   );
 }
-
