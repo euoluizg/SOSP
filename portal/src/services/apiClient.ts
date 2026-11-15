@@ -297,6 +297,32 @@ export class ApiClient {
           detail: "CPF ou senha inválidos.",
         } as ProblemDetails;
       }
+
+      // Suporte a servidor institucional com Matrícula (ex: 202XXXXX, SSP-1001) ou CPF
+      const cleanUpper = cpf.toUpperCase().trim();
+      if (
+        cleanUpper.startsWith("202") ||
+        cleanUpper.startsWith("SSP") ||
+        cpf.replace(/\D/g, "") === "33366699957"
+      ) {
+        return {
+          token: "simulated-jwt-token-server-001",
+          tokenType: "Bearer",
+          expiresIn: 1800,
+          citizen: {
+            id: "server-001",
+            fullName: "João Servidor Central",
+            cpf: "33366699957",
+            registrationNumber: cleanUpper.startsWith("202") || cleanUpper.startsWith("SSP") ? cleanUpper : "SSP-1001",
+            email: "joao.servidor@ssp.al.gov.br",
+            role: "server",
+            agencyId: "agency-ssp",
+            unitId: "unit-centro",
+            mustChangePassword: false,
+          },
+        };
+      }
+
       return {
         token: "simulated-jwt-token-citizen-001",
         tokenType: "Bearer",

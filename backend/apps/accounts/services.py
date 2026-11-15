@@ -158,10 +158,13 @@ class AccountService:
 
     @staticmethod
     def login_citizen(cpf: str, password: str) -> Dict[str, Any]:
-        clean_cpf = "".join(filter(str.isdigit, cpf))
+        raw_identifier = (cpf or "").strip()
+        clean_cpf = "".join(filter(str.isdigit, raw_identifier))
+        # Se for CPF de 11 dígitos, a chave de bloqueio é o CPF limpo. Se for matrícula, é a matrícula normalizada.
+        lock_key = clean_cpf if len(clean_cpf) == 11 and not any(c.isalpha() for c in raw_identifier) else raw_identifier.upper()
 
         # Verifica bloqueio temporário (RN-29)
-        is_locked, remaining = citizen_repository.is_locked_out(clean_cpf)
+        is_locked, remaining = citizen_repository.is_locked_out(lock_key)
         if is_locked:
             minutes = (remaining // 60) + 1
             raise ProblemDetailsException(
@@ -170,7 +173,11 @@ class AccountService:
                 status_code=429,
             )
 
-        citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf)
+        lookup_fn = getattr(citizen_repository, "get_by_identifier_for_auth", None)
+        if callable(lookup_fn):
+            citizen = lookup_fn(raw_identifier)
+        else:
+            citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf or raw_identifier)
 
         # Mitigação contra Timing Attack (executa Argon2id mesmo quando CPF não existe)
         target_hash = citizen.get("passwordHash") if citizen else DUMMY_ARGON2_HASH
@@ -181,7 +188,7 @@ class AccountService:
             pwd_valid = False
 
         if not citizen or not pwd_valid:
-            attempts = citizen_repository.record_failed_attempt(clean_cpf)
+            attempts = citizen_repository.record_failed_attempt(lock_key)
             if attempts >= 5:
                 raise ProblemDetailsException(
                     detail="Número máximo de tentativas atingido. Acesso bloqueado por 5 minutos.",
@@ -203,7 +210,7 @@ class AccountService:
             )
 
         # Login bem sucedido -> reseta contador
-        citizen_repository.reset_failed_attempts(clean_cpf)
+        citizen_repository.reset_failed_attempts(lock_key)
 
         must_change_pwd = bool(citizen.get("mustChangePassword", False))
         token = generate_sosp_token(

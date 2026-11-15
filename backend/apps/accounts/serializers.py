@@ -45,7 +45,7 @@ class CitizenRegisterSerializer(serializers.Serializer):
         return attrs
 
 class CitizenLoginSerializer(serializers.Serializer):
-    cpf = serializers.CharField(max_length=14)
+    cpf = serializers.CharField(max_length=20)
     password = serializers.CharField(write_only=True)
 
 class PasswordRecoveryRequestSerializer(serializers.Serializer):

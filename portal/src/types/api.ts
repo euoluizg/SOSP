@@ -174,6 +174,7 @@ export interface UserSession {
   cpf: string;
   email: string;
   role: string;
+  registrationNumber?: string | null;
   agencyId?: string | null;
   unitId?: string | null;
   mustChangePassword?: boolean;
