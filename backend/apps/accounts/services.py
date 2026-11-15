@@ -173,11 +173,16 @@ class AccountService:
                 status_code=429,
             )
 
-        lookup_fn = getattr(citizen_repository, "get_by_identifier_for_auth", None)
-        if callable(lookup_fn):
-            citizen = lookup_fn(raw_identifier)
-        else:
-            citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf or raw_identifier)
+        citizen = None
+        if len(clean_cpf) == 11 and not any(c.isalpha() for c in raw_identifier):
+            citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf)
+
+        if not citizen:
+            lookup_fn = getattr(citizen_repository, "get_by_identifier_for_auth", None)
+            if callable(lookup_fn):
+                citizen = lookup_fn(raw_identifier)
+            else:
+                citizen = citizen_repository.get_by_cpf_for_auth(clean_cpf or raw_identifier)
 
         # Mitigação contra Timing Attack (executa Argon2id mesmo quando CPF não existe)
         target_hash = citizen.get("passwordHash") if citizen else DUMMY_ARGON2_HASH
