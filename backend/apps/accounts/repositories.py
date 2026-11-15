@@ -6,6 +6,7 @@ import sys
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
+from common.repositories import AbstractRepository
 
 DEFAULT_DEMO_CREDENTIAL = os.environ.get("DEMO_ACCOUNTS_PASSWORD")
 if not DEFAULT_DEMO_CREDENTIAL:
@@ -56,7 +57,7 @@ class FunctionNotFoundError(Exception):
     pass
 
 
-class CitizenInMemoryRepository:
+class CitizenInMemoryRepository(AbstractRepository):
     """Repositório em memória para Cidadãos e Usuários (sem banco nesta fase)."""
     def __init__(self):
         # Usuários sintéticos para demonstração dos 3 perfis e testes locais com credencial dinâmica
@@ -185,6 +186,36 @@ class CitizenInMemoryRepository:
 
     def get_by_id(self, citizen_id: str) -> Optional[Dict[str, Any]]:
         return self._citizens.get(citizen_id)
+
+    def list_all(self, **filters: Any) -> List[Dict[str, Any]]:
+        results = list(self._citizens.values())
+        if filters.get("role"):
+            results = [r for r in results if r.get("role") == filters["role"]]
+        if "isActive" in filters:
+            results = [r for r in results if r.get("isActive") == filters["isActive"]]
+        return results
+
+    def get_by_identifier_for_auth(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Busca para autenticação por CPF (11 dígitos) ou Matrícula funcional (ex: 202XXXXX, SSP-1001)."""
+        clean_cpf = "".join(filter(str.isdigit, identifier))
+        if len(clean_cpf) == 11 and not any(c.isalpha() for c in identifier):
+            res = self.get_by_cpf_for_auth(clean_cpf)
+            if res:
+                return res
+
+        ident_upper = identifier.strip().upper()
+        for u in self._citizens.values():
+            reg = str(u.get("registrationNumber") or "").strip().upper()
+            if reg and (reg == ident_upper or reg.replace("-", "") == ident_upper.replace("-", "")):
+                res = dict(u)
+                must_change = res.get("mustChangePassword", True)
+                res["mustChangePassword"] = True if must_change is None else bool(must_change)
+                return res
+
+        # Fallback por CPF caso o clean_cpf coincida
+        if clean_cpf:
+            return self.get_by_cpf_for_auth(clean_cpf)
+        return None
 
     def get_internal_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
         for u in self._citizens.values():
@@ -387,13 +418,67 @@ class CitizenInMemoryRepository:
                 return True
         return False
 
-class CitizenDjangoORMRepository:
+class CitizenDjangoORMRepository(AbstractRepository):
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
 
     def get_by_id(self, citizen_id: str) -> Optional[Dict[str, Any]]:
         from .models import Citizen
         c = Citizen.objects.filter(id=citizen_id, is_active=True, deleted_at__isnull=True).first()
         return self._to_dict(c) if c else None
+
+    def list_all(self, **filters: Any) -> List[Dict[str, Any]]:
+        from .models import Citizen
+        qs = Citizen.objects.filter(deleted_at__isnull=True)
+        if "isActive" in filters:
+            qs = qs.filter(is_active=filters["isActive"])
+        return [self._to_dict(c) for c in qs]
+
+    def get_by_identifier_for_auth(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Busca para autenticação por CPF (11 dígitos) ou Matrícula funcional (ex: 202XXXXX, SSP-1001)."""
+        clean_cpf = "".join(filter(str.isdigit, identifier))
+        if len(clean_cpf) == 11 and not any(c.isalpha() for c in identifier):
+            res = self.get_by_cpf_for_auth(clean_cpf)
+            if res:
+                return res
+
+        from .models import InternalUser
+        from django.db import models
+        ident_upper = identifier.strip().upper()
+        u = InternalUser.objects.filter(
+            is_active=True, deleted_at__isnull=True
+        ).filter(
+            models.Q(registration_number__iexact=ident_upper) |
+            models.Q(registration_number__iexact=ident_upper.replace("-", ""))
+        ).first()
+
+        if u:
+            role = u.role
+            if role in ("servant", "server"):
+                role = "server"
+            elif role in ("manager", "gestor"):
+                role = "gestor"
+            must_change = getattr(u, "must_change_password", None)
+            must_change_val = True if must_change is None else bool(must_change)
+            return {
+                "id": str(u.id),
+                "fullName": u.full_name,
+                "cpf": u.cpf,
+                "email": u.email,
+                "registrationNumber": u.registration_number,
+                "role": role,
+                "agencyId": str(u.agency_id) if u.agency_id else None,
+                "unitId": str(u.unit_id) if u.unit_id else None,
+                "canManageCatalog": u.can_manage_catalog,
+                "passwordHash": u.password_hash,
+                "isActive": u.is_active,
+                "blockedUntil": None,
+                "loginAttempts": 0,
+                "mustChangePassword": must_change_val,
+            }
+
+        if clean_cpf:
+            return self.get_by_cpf_for_auth(clean_cpf)
+        return None
 
     def get_by_cpf(self, cpf: str) -> Optional[Dict[str, Any]]:
         from .models import Citizen

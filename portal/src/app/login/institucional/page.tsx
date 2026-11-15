@@ -90,7 +90,13 @@ function InstitutionalLoginContent() {
   }, [mustChangePasswordMode, handleCancelPasswordModal]);
 
   const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCpf(maskCPF(e.target.value));
+    const raw = e.target.value;
+    const hasLetters = /[a-zA-Z]/.test(raw);
+    if (!hasLetters && raw.replace(/\D/g, "").length <= 11) {
+      setCpf(maskCPF(raw));
+    } else {
+      setCpf(raw.toUpperCase().slice(0, 20));
+    }
     if (formError) setFormError(null);
   };
 
@@ -99,13 +105,25 @@ function InstitutionalLoginContent() {
     if (lockoutSeconds > 0) return;
 
     if (!cpf) {
-      setFormError("Informe o seu CPF funcional.");
+      setFormError("Informe o seu CPF funcional ou Matrícula.");
       return;
     }
-    if (!isValidCPF(cpf)) {
-      setFormError("CPF inválido. Verifique os dígitos informados.");
-      return;
+
+    const cleanDigits = cpf.replace(/\D/g, "");
+    const isCpfFormat = cleanDigits.length === 11 && !/[a-zA-Z]/.test(cpf);
+    if (isCpfFormat) {
+      if (!isValidCPF(cpf)) {
+        setFormError("CPF inválido. Verifique os dígitos informados.");
+        return;
+      }
+    } else {
+      const isMatriculaFormat = /^[A-Z0-9-]{4,20}$/i.test(cpf.trim());
+      if (!isMatriculaFormat) {
+        setFormError("Identificador inválido. Digite um CPF válido ou uma Matrícula funcional (ex: 202XXXXX).");
+        return;
+      }
     }
+
     if (!password || password.length < 4) {
       setFormError("Informe a sua senha institucional.");
       return;
@@ -340,13 +358,13 @@ function InstitutionalLoginContent() {
                   value={cpf}
                   onChange={handleCpfChange}
                   disabled={isSubmitting || lockoutSeconds > 0}
-                  placeholder="000.000.000-00"
-                  maxLength={14}
+                  placeholder="000.000.000-00 ou Matrícula (ex: 202XXXXX)"
+                  maxLength={20}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#0F2942] focus:border-transparent min-h-[44px]"
                   aria-describedby="cpf-hint"
                 />
                 <p id="cpf-hint" className="text-xs text-gray-500 mt-1">
-                  Digite apenas os 11 números do seu documento
+                  Digite apenas os 11 números do seu CPF ou sua matrícula (ex: 202XXXXX)
                 </p>
               </div>
 

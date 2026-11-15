@@ -34,8 +34,8 @@ interface InternalUser {
 const INITIAL_USERS: InternalUser[] = [
   {
     id: "user-1",
-    name: "Arthur Franco",
-    email: "arthur.franco@sosp.al.gov.br",
+    name: "João Servidor Central",
+    email: "joao.servidor@ssp.al.gov.br",
     cpfMasked: "***.789.012-**",
     agencyName: "Secretaria de Estado da Segurança Pública",
     role: "attendant",

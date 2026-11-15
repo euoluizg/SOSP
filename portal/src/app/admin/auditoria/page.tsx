@@ -31,7 +31,7 @@ interface AuditLog {
 const INITIAL_LOGS: AuditLog[] = [
   {
     id: "aud-001",
-    actor: "Arthur Franco (Atendente)",
+    actor: "João Servidor Central (Atendente)",
     action: "UPDATE",
     targetTable: "schedulingAppointment",
     targetId: "20261105-1001",
