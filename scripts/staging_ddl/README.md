@@ -86,3 +86,18 @@ SOSP_CONFIRM_STAGING_APPLY=true python scripts/staging_ddl/02_apply_staging_ddl.
 python scripts/staging_ddl/03_postflight_verify.py
 ```
 *Garantia: Confirma que todos os 40 objetos foram criados com sucesso e que a função de autenticação está protegida.*
+
+## 5. Catálogo de gêneros para o cadastro (RF-01)
+
+1. Confirme o projeto, a identidade administrativa e o ponto de recuperação conforme o processo de staging. Confira que `accounts.0002` está aplicada.
+2. Publique a versão com a consulta de gêneros corrigida e confirme que as instâncias anteriores encerraram. Antes da publicação, a versão antiga pode associar `Feminino` a quem escolheu `Prefiro não informar` porque usa a primeira linha do catálogo como alternativa.
+3. Com autorização para alterar o banco e as variáveis administrativas carregadas pelo gestor de segredos, confira o plano e execute a migration pelo Django, na pasta do backend:
+
+   ```bash
+   python manage.py migrate accounts 0003_seed_gender_catalog --plan
+   python manage.py migrate accounts 0003_seed_gender_catalog
+   ```
+
+4. Confirme o registro da migration e a leitura das cinco referências ativas com a role de runtime. A role deve continuar sem permissão de `INSERT` em `accountsGender`. O teste funcional usa um cadastro de homologação autorizado e deve receber `201` com a opção selecionada.
+
+A migration insere opções ausentes e preserva os registros existentes. A reversão no Django preserva as referências porque podem estar vinculadas a cidadãos.
