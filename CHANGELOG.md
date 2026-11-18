@@ -12,6 +12,10 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.
 
 - **Quality Gates e Governança (.github/workflows):** Implantação dos 4 Quality Gates automatizados e fluxo de Pull Requests via GitHub App (`sosp-agents-bot`), com aprovação formal obrigatória do CODEOWNER (`@euoluizg`).
 
+### Corrigido
+
+- **Cadastro do cidadão (RF-01):** A migration `accounts.0003_seed_gender_catalog` provisiona as opções oficiais de gênero. O cadastro consulta referências ativas e retorna `503` quando a opção esperada está indisponível.
+
 ---
 
 ## [1.1.0] — 2026-11-01

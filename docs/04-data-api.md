@@ -1178,6 +1178,8 @@ CREATE TRIGGER trgNotificationsPreferenceUpdatedAt BEFORE UPDATE ON notification
 -- DADOS INICIAIS
 -- =============================================================================
 
+-- Em ambientes Django, aplicar accounts.0003_seed_gender_catalog com a role
+-- administrativa. O cadastro consulta referências ativas com a role de runtime.
 INSERT INTO accountsGender (name, sortOrder) VALUES
   ('Feminino', 1),
   ('Masculino', 2),

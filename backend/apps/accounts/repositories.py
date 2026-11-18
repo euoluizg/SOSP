@@ -749,31 +749,11 @@ class CitizenDjangoORMRepository(AbstractRepository):
         return self._to_dict(c) if c else None
 
     def save(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        from .models import Citizen, Gender
+        from .models import Citizen
         from django.db import IntegrityError
         from common.exceptions import ProblemDetailsException
 
         clean_cpf = "".join(filter(str.isdigit, data["cpf"]))
-        
-        gender_id = data.get("genderId")
-        gender = Gender.objects.filter(id=gender_id).first() if gender_id else None
-        if not gender:
-            gender_val = data.get("gender", "")
-            if gender_val == "F":
-                gender = Gender.objects.filter(name="Feminino").first()
-            elif gender_val == "M":
-                gender = Gender.objects.filter(name="Masculino").first()
-            elif gender_val == "O":
-                gender = Gender.objects.filter(name="Outro").first()
-                if not gender:
-                    gender = Gender.objects.create(name="Outro", sort_order=3)
-            elif gender_val == "N":
-                gender = Gender.objects.filter(name="Não Informado").first()
-
-            if not gender:
-                gender = Gender.objects.first()
-                if not gender:
-                    gender = Gender.objects.create(name="Não Informado", sort_order=99)
 
         citizen_id = data.get("id")
         citizen = None
@@ -790,7 +770,7 @@ class CitizenDjangoORMRepository(AbstractRepository):
                     phone="".join(filter(str.isdigit, data.get("phone", ""))),
                     password_hash=data.get("passwordHash", ""),
                     password_salt=data.get("passwordSalt", "salt"),
-                    gender=gender,
+                    gender=self._get_registration_gender(data),
                     gender_description=data.get("genderDescription") or data.get("gender_description", ""),
                     is_pcd=data.get("isPcd", False),
                     disability_description=data.get("pcdDetails") or data.get("disabilityDescription", ""),
@@ -823,6 +803,36 @@ class CitizenDjangoORMRepository(AbstractRepository):
             raise
 
         return self._to_dict(citizen)
+
+    @staticmethod
+    def _get_registration_gender(data: Dict[str, Any]):
+        from .models import Gender
+        from common.exceptions import ProblemDetailsException
+
+        active_genders = Gender.objects.filter(is_active=True)
+        gender_id = data.get("genderId")
+        if gender_id:
+            reference = active_genders.filter(id=gender_id).first()
+            if reference is not None:
+                return reference
+
+        code = data.get("gender") or "N"
+        names = {
+            "F": ("Feminino",),
+            "M": ("Masculino",),
+            "O": ("Outro",),
+            "N": ("Prefiro não informar", "Não Informado"),
+        }
+        for name in names.get(code, ()):
+            reference = active_genders.filter(name=name).first()
+            if reference is not None:
+                return reference
+
+        raise ProblemDetailsException(
+            detail="O cadastro está temporariamente indisponível. Tente novamente mais tarde.",
+            title="Cadastro indisponível",
+            status_code=503,
+        )
 
     def record_failed_attempt(self, cpf: str) -> int:
         from .models import LoginAttempt

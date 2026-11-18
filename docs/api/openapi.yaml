@@ -139,6 +139,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CitizenRegistrationResponse'
+        '400':
+          description: Dados de cadastro inválidos
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: CPF ou e-mail já cadastrado
           content:
@@ -147,6 +153,12 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Cadastro temporariamente indisponível por ausência de referência ativa no catálogo de gêneros
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /auth/internal/login:
     post:

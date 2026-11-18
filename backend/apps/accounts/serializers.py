@@ -27,6 +27,11 @@ class CitizenRegisterSerializer(serializers.Serializer):
     city = serializers.CharField(max_length=100)
     state = serializers.CharField(max_length=2)
 
+    def validate_gender(self, value):
+        if value and value not in ("F", "M", "O", "N"):
+            raise serializers.ValidationError("Selecione uma opção de gênero válida.")
+        return value
+
     def validate(self, attrs):
         # Normalização de campos com alias (CEP/zipCode, celular/telefone, pcdDetails/disabilityType)
         zip_code = attrs.get("zipCode") or attrs.get("cep") or ""
