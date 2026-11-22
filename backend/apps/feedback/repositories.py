@@ -54,7 +54,9 @@ class FeedbackDjangoORMRepository:
         self._faqs = FeedbackInMemoryRepository()._faqs
 
     def list_faqs(self) -> List[Dict[str, Any]]:
-        return self._faqs
+        from apps.catalog.selectors import list_active_faqs
+        items = list_active_faqs()
+        return items if items else self._faqs
 
     def create_question(self, question_data: Dict[str, Any]) -> Dict[str, Any]:
         from .models import Question

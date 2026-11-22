@@ -9,6 +9,7 @@ urlpatterns = [
     # Módulos SOSP — /api/v1/ (Aceita com ou sem barra final)
     re_path(r"^api/v1/auth/", include("apps.accounts.urls_auth")),
     re_path(r"^api/v1/citizens", include("apps.accounts.urls_citizens")),
+    re_path(r"^api/v1/internal-users", include("apps.accounts.urls_internal_users")),
     re_path(r"^api/v1/services", include("apps.catalog.urls_services")),
     re_path(r"^api/v1/agencies", include("apps.catalog.urls_agencies")),
     re_path(r"^api/v1/units", include("apps.catalog.urls_units")),

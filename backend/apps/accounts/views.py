@@ -2,12 +2,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from common.security.permissions import HasChangedTemporaryPassword, IsAdminUser
 from .serializers import (
     CitizenRegisterSerializer,
     CitizenLoginSerializer,
     PasswordRecoveryRequestSerializer,
     PasswordResetSerializer,
     ChangePasswordSerializer,
+    InternalUserCreateSerializer,
 )
 from .services import AccountService
 from .repositories import citizen_repository
@@ -95,4 +97,39 @@ class CitizenMeView(APIView):
         safe_copy = dict(citizen)
         safe_copy.pop("passwordHash", None)
         return Response(safe_copy, status=status.HTTP_200_OK)
+
+
+class InternalUsersListCreateView(APIView):
+    """Listagem e provisionamento de usuários internos (RF-12 — restrito a Admin/Superadmin)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsAdminUser]
+
+    def get(self, request):
+        users = AccountService.list_internal_users()
+        return Response(users, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = InternalUserCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        created = AccountService.create_internal_user(serializer.validated_data, actor_user=request.user)
+        return Response(created, status=status.HTTP_201_CREATED)
+
+
+class InternalUserDetailView(APIView):
+    """Desativação lógica de usuário interno (RN-40 / RS-05 — restrito a Admin/Superadmin)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsAdminUser]
+
+    def delete(self, request, user_id):
+        result = AccountService.deactivate_internal_user(user_id=user_id, actor_user=request.user)
+        return Response(result, status=status.HTTP_200_OK)
+
+    def patch(self, request, user_id):
+        if request.data.get("isActive") is False:
+            result = AccountService.deactivate_internal_user(user_id=user_id, actor_user=request.user)
+            return Response(result, status=status.HTTP_200_OK)
+        raise ProblemDetailsException(
+            detail="Somente a desativação lógica (isActive=false) é suportada nesta rota.",
+            status_code=400,
+        )
 

@@ -1,17 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Users,
   Plus,
   Search,
-  Shield,
   Trash2,
   ChevronRight,
-  Building,
-  KeyRound,
-  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
@@ -19,63 +16,45 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
+import {
+  getInternalUsers,
+  createInternalUser,
+  deactivateInternalUser,
+  getAgencies,
+  getUnits,
+} from "@/services/apiClient";
+import type { Agency, Unit, ProblemDetails } from "@/types/api";
 
 interface InternalUser {
   id: string;
   name: string;
   email: string;
   cpfMasked: string;
+  registrationNumber: string;
   agencyName: string;
   role: "attendant" | "manager" | "admin";
   canManageCatalog: boolean;
   isActive: boolean;
 }
 
-const INITIAL_USERS: InternalUser[] = [
-  {
-    id: "user-1",
-    name: "João Servidor Central",
-    email: "joao.servidor@ssp.al.gov.br",
-    cpfMasked: "***.789.012-**",
-    agencyName: "Secretaria de Estado da Segurança Pública",
-    role: "attendant",
-    canManageCatalog: true,
-    isActive: true,
-  },
-  {
-    id: "user-2",
-    name: "Mozart Melo",
-    email: "mozart.melo@sosp.al.gov.br",
-    cpfMasked: "***.123.456-**",
-    agencyName: "Governo do Estado de Alagoas",
-    role: "admin",
-    canManageCatalog: true,
-    isActive: true,
-  },
-  {
-    id: "user-3",
-    name: "Luiz Gustavo",
-    email: "luiz.gustavo@sosp.al.gov.br",
-    cpfMasked: "***.456.789-**",
-    agencyName: "Central Já! Centro",
-    role: "manager",
-    canManageCatalog: false,
-    isActive: true,
-  },
-  {
-    id: "user-4",
-    name: "Carlos Atendente",
-    email: "carlos.atendimento@sosp.al.gov.br",
-    cpfMasked: "***.987.654-**",
-    agencyName: "DETRAN-AL",
-    role: "attendant",
-    canManageCatalog: false,
-    isActive: false,
-  },
-];
+function normalizeRoleForUi(role: string): InternalUser["role"] {
+  if (role === "admin" || role === "superadmin" || role === "administrator") return "admin";
+  if (role === "manager" || role === "gestor") return "manager";
+  return "attendant";
+}
+
+function roleUiToApi(role: InternalUser["role"]): string {
+  if (role === "admin") return "admin";
+  if (role === "manager") return "gestor";
+  return "server";
+}
 
 export default function AdminUsersPage() {
-  const [users, setUsers] = useState<InternalUser[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<InternalUser[]>([]);
+  const [agencies, setAgencies] = useState<Agency[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
 
@@ -86,46 +65,122 @@ export default function AdminUsersPage() {
     name: "",
     email: "",
     cpf: "",
-    agencyName: "Central Já! Centro",
+    registrationNumber: "",
+    agencyId: "",
+    unitId: "",
+    temporaryPassword: "",
     role: "attendant" as InternalUser["role"],
     canManageCatalog: false,
   });
 
-  const handleCreateUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUser.name || !newUser.email) return;
-
-    const created: InternalUser = {
-      id: `user-${Date.now()}`,
-      name: newUser.name,
-      email: newUser.email,
-      cpfMasked: "***.***.***-**",
-      agencyName: newUser.agencyName,
-      role: newUser.role,
-      canManageCatalog: newUser.canManageCatalog,
-      isActive: true,
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setIsLoading(true);
+      setErrorMessage(null);
+      try {
+        const [loadedUsers, loadedAgencies, loadedUnits] = await Promise.all([
+          getInternalUsers(),
+          getAgencies(),
+          getUnits(),
+        ]);
+        if (!active) return;
+        setAgencies(loadedAgencies);
+        setUnits(loadedUnits);
+        const agencyMap = new Map(loadedAgencies.map((a) => [a.id, a.name]));
+        setUsers(
+          loadedUsers.map((u) => ({
+            id: u.id,
+            name: u.fullName,
+            email: u.email,
+            cpfMasked: u.cpfMasked,
+            registrationNumber: u.registrationNumber,
+            agencyName: (u.agencyId && agencyMap.get(u.agencyId)) || "Administração Geral SOSP",
+            role: normalizeRoleForUi(u.role),
+            canManageCatalog: u.canManageCatalog,
+            isActive: u.isActive,
+          }))
+        );
+      } catch (err: unknown) {
+        if (!active) return;
+        const problem = err as ProblemDetails;
+        setErrorMessage(problem?.detail || "Não foi possível carregar os usuários internos.");
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
     };
+  }, []);
 
-    setUsers((prev) => [created, ...prev]);
-    setIsCreateModalOpen(false);
-    setNewUser({
-      name: "",
-      email: "",
-      cpf: "",
-      agencyName: "Central Já! Centro",
-      role: "attendant",
-      canManageCatalog: false,
-    });
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUser.name || !newUser.email || !newUser.cpf || !newUser.registrationNumber) return;
+    setErrorMessage(null);
+
+    try {
+      const created = await createInternalUser({
+        fullName: newUser.name.trim(),
+        cpf: newUser.cpf.replace(/\D/g, ""),
+        email: newUser.email.trim(),
+        registrationNumber: newUser.registrationNumber.trim().toUpperCase(),
+        role: roleUiToApi(newUser.role),
+        agencyId: newUser.agencyId || null,
+        unitId: newUser.unitId || null,
+        canManageCatalog: newUser.canManageCatalog,
+        temporaryPassword: newUser.temporaryPassword || undefined,
+      });
+      const agencyName =
+        agencies.find((a) => a.id === created.agencyId)?.name || "Administração Geral SOSP";
+      setUsers((prev) => [
+        {
+          id: created.id,
+          name: created.fullName,
+          email: created.email,
+          cpfMasked: created.cpfMasked,
+          registrationNumber: created.registrationNumber,
+          agencyName,
+          role: normalizeRoleForUi(created.role),
+          canManageCatalog: created.canManageCatalog,
+          isActive: created.isActive,
+        },
+        ...prev,
+      ]);
+      setIsCreateModalOpen(false);
+      setNewUser({
+        name: "",
+        email: "",
+        cpf: "",
+        registrationNumber: "",
+        agencyId: "",
+        unitId: "",
+        temporaryPassword: "",
+        role: "attendant",
+        canManageCatalog: false,
+      });
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setErrorMessage(problem?.detail || "Erro ao cadastrar usuário interno.");
+    }
   };
 
-  const handleConfirmDeactivate = () => {
+  const handleConfirmDeactivate = async () => {
     if (!deactivatingUser) return;
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === deactivatingUser.id ? { ...u, isActive: false } : u
-      )
-    );
-    setDeactivatingUser(null);
+    try {
+      await deactivateInternalUser(deactivatingUser.id);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === deactivatingUser.id ? { ...u, isActive: false } : u
+        )
+      );
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setErrorMessage(problem?.detail || "Erro ao revogar acesso do usuário.");
+    } finally {
+      setDeactivatingUser(null);
+    }
   };
 
   const filteredUsers = users.filter((u) => {
@@ -309,11 +364,52 @@ export default function AdminUsersPage() {
           />
 
           <Input
+            label="CPF (11 dígitos)"
+            id="u-cpf"
+            placeholder="000.000.000-00"
+            value={newUser.cpf}
+            onChange={(e) => setNewUser({ ...newUser, cpf: e.target.value })}
+            required
+          />
+
+          <Input
+            label="Matrícula Funcional"
+            id="u-reg"
+            placeholder="Ex: SSP-2026"
+            value={newUser.registrationNumber}
+            onChange={(e) => setNewUser({ ...newUser, registrationNumber: e.target.value })}
+            required
+          />
+
+          <Select
             label="Órgão de Lotação"
             id="u-agency"
-            value={newUser.agencyName}
-            onChange={(e) => setNewUser({ ...newUser, agencyName: e.target.value })}
-            required
+            value={newUser.agencyId}
+            onChange={(e) => setNewUser({ ...newUser, agencyId: e.target.value })}
+            options={[
+              { value: "", label: "Administração Geral SOSP (sem vínculo exclusivo)" },
+              ...agencies.map((a) => ({ value: a.id, label: `${a.acronym} — ${a.name}` })),
+            ]}
+          />
+
+          <Select
+            label="Unidade de Atendimento (opcional)"
+            id="u-unit"
+            value={newUser.unitId}
+            onChange={(e) => setNewUser({ ...newUser, unitId: e.target.value })}
+            options={[
+              { value: "", label: "Nenhuma unidade específica" },
+              ...units.map((u) => ({ value: u.id, label: `${u.name} (${u.city})` })),
+            ]}
+          />
+
+          <Input
+            label="Senha Provisória (opcional — gerada com troca obrigatória)"
+            id="u-pwd"
+            type="password"
+            placeholder="Deixe vazio para gerar automaticamente"
+            value={newUser.temporaryPassword}
+            onChange={(e) => setNewUser({ ...newUser, temporaryPassword: e.target.value })}
           />
 
           <Select

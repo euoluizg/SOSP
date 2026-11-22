@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { getServiceById } from "@/services/apiClient";
+import { getServiceById, getServiceGuidance, saveServiceChecklist, isAuthenticated } from "@/services/apiClient";
 import type { Service } from "@/types/api";
 
 export default function ServiceGuidePage() {
@@ -26,7 +26,7 @@ export default function ServiceGuidePage() {
   const [service, setService] = useState<Service | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Estado dos documentos checados, persistido no localStorage (RN-15)
+  // Estado dos documentos checados, sincronizado com API /guidance (autenticado) e localStorage
   const [checkedDocs, setCheckedDocs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -36,16 +36,35 @@ export default function ServiceGuidePage() {
         const data = await getServiceById(serviceId);
         setService(data);
 
-        // Carrega progresso salvo no localStorage
         const storageKey = `sosp_checklist_${serviceId}`;
+        const localChecked: Record<string, boolean> = {};
         const saved = localStorage.getItem(storageKey);
         if (saved) {
           try {
-            setCheckedDocs(JSON.parse(saved));
+            Object.assign(localChecked, JSON.parse(saved));
           } catch {
             // Ignora erro de parse
           }
         }
+
+        if (isAuthenticated()) {
+          try {
+            const remote = await getServiceGuidance(serviceId);
+            if (Array.isArray(remote?.checkedItems)) {
+              const remoteMap: Record<string, boolean> = {};
+              remote.checkedItems.forEach((id) => {
+                remoteMap[id] = true;
+              });
+              setCheckedDocs(remoteMap);
+              localStorage.setItem(storageKey, JSON.stringify(remoteMap));
+              return;
+            }
+          } catch {
+            // Fallback para cache local se guidance ainda não estiver inicializado
+          }
+        }
+
+        setCheckedDocs(localChecked);
       } catch (err) {
         console.error("Erro ao carregar dados do guia:", err);
       } finally {
@@ -62,6 +81,14 @@ export default function ServiceGuidePage() {
       const updated = { ...prev, [docId]: !prev[docId] };
       const storageKey = `sosp_checklist_${serviceId}`;
       localStorage.setItem(storageKey, JSON.stringify(updated));
+      if (isAuthenticated()) {
+        const checkedIds = Object.entries(updated)
+          .filter(([, checked]) => checked)
+          .map(([id]) => id);
+        saveServiceChecklist(serviceId, checkedIds).catch(() => {
+          // Mantém progresso local em caso de instabilidade de rede
+        });
+      }
       return updated;
     });
   };

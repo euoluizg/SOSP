@@ -1,15 +1,37 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MOCK_SERVICES } from "@/mocks/demoData";
+import { getServices } from "@/services/apiClient";
+import type { Service } from "@/types/api";
 import { ServiceCard } from "@/components/ui/ServiceCard";
 import { Button } from "@/components/ui/Button";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 export default function HomePage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
+  const [featuredServices, setFeaturedServices] = useState<Service[]>([]);
+  const [isLoadingServices, setIsLoadingServices] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadFeatured = useCallback(async () => {
+    setIsLoadingServices(true);
+    setLoadError(null);
+    try {
+      const res = await getServices({ page: 1, pageSize: 3 });
+      setFeaturedServices(res.items || []);
+    } catch {
+      setLoadError("Não foi possível carregar os serviços em destaque no momento.");
+    } finally {
+      setIsLoadingServices(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFeatured();
+  }, [loadFeatured]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,11 +128,35 @@ export default function HomePage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {MOCK_SERVICES.slice(0, 3).map((service) => (
-            <ServiceCard key={service.id} service={service} />
-          ))}
-        </div>
+        {isLoadingServices ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" aria-busy="true">
+            <Skeleton className="h-52 w-full rounded-xl" />
+            <Skeleton className="h-52 w-full rounded-xl" />
+            <Skeleton className="h-52 w-full rounded-xl" />
+          </div>
+        ) : loadError ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p className="text-sm text-red-700 font-medium mb-3">{loadError}</p>
+            <Button variant="secondary" size="sm" onClick={loadFeatured}>
+              Tentar novamente
+            </Button>
+          </div>
+        ) : featuredServices.length === 0 ? (
+          <div className="bg-white border border-[#CBD2DC] rounded-xl p-6 text-center">
+            <p className="text-sm text-[#4A5568]">
+              Nenhum serviço público publicado no catálogo ainda.
+            </p>
+            <Link href="/servicos" className="text-sm font-bold text-[#1351B4] hover:underline mt-2 inline-block">
+              Explorar catálogo →
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {featuredServices.map((service) => (
+              <ServiceCard key={service.id} service={service} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Destaque Institucional — Como Funciona o SOSP */}

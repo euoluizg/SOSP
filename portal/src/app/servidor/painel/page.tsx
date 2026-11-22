@@ -19,6 +19,12 @@ import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
 import { getStoredUserSession } from "@/utils/session";
+import {
+  IS_API_MOCK_MODE,
+  getOperationalAppointments,
+  updateAppointmentStatus,
+} from "@/services/apiClient";
+import type { Appointment, ProblemDetails } from "@/types/api";
 
 interface QueueItem {
   id: string;
@@ -89,8 +95,29 @@ const INITIAL_QUEUE: QueueItem[] = [
   },
 ];
 
+function mapApiAppointmentToQueueItem(a: Appointment): QueueItem {
+  const statusMap: Record<Appointment["status"], QueueItem["status"]> = {
+    scheduled: "waiting",
+    confirmed: "in_progress",
+    completed: "completed",
+    no_show: "no_show",
+    cancelled: "cancelled",
+  };
+  return {
+    id: a.id,
+    time: a.scheduledTime,
+    protocol: a.protocolNumber,
+    citizenName: a.citizenName,
+    citizenCpf: a.citizenCpfMasked,
+    serviceName: a.serviceName,
+    status: statusMap[a.status] || "waiting",
+  };
+}
+
 export default function ServerDashboardPage() {
-  const [queue, setQueue] = useState<QueueItem[]>(INITIAL_QUEUE);
+  const [queue, setQueue] = useState<QueueItem[]>(IS_API_MOCK_MODE ? INITIAL_QUEUE : []);
+  const [isLoadingQueue, setIsLoadingQueue] = useState<boolean>(!IS_API_MOCK_MODE);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [noShowItem, setNoShowItem] = useState<QueueItem | null>(null);
@@ -101,58 +128,108 @@ export default function ServerDashboardPage() {
   const [serverMatricula, setServerMatricula] = useState<string>("SSP-1001");
   const [serverLocation] = useState<string>("Maceió - AL");
 
-  // Carrega e sincroniza fila persistente e dados da sessão
+  const loadLiveQueue = async () => {
+    if (IS_API_MOCK_MODE) return;
+    setIsLoadingQueue(true);
+    setQueueError(null);
+    try {
+      const data = await getOperationalAppointments();
+      setQueue(data.map(mapApiAppointmentToQueueItem));
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setQueueError(problem?.detail || "Não foi possível carregar a fila operacional da unidade.");
+    } finally {
+      setIsLoadingQueue(false);
+    }
+  };
+
+  // Carrega e sincroniza fila (API real em staging/produção; localStorage em modo mock/testes)
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const storedQueue = localStorage.getItem(STORAGE_QUEUE_KEY);
-      if (storedQueue) {
-        try {
-          const parsed = JSON.parse(storedQueue);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setQueue(parsed);
-          }
-        } catch (e) {
-          console.error("Erro ao carregar fila persistente:", e);
-        }
-      }
-
       const session = getStoredUserSession();
       if (session) {
         if (session.fullName) {
           setServerName(session.fullName);
         }
-        if ((session as { registrationNumber?: string }).registrationNumber) {
-          setServerMatricula((session as { registrationNumber?: string }).registrationNumber || "SSP-1001");
+        if (session.registrationNumber) {
+          setServerMatricula(session.registrationNumber || "SSP-1001");
         }
+      }
+
+      if (IS_API_MOCK_MODE) {
+        const storedQueue = localStorage.getItem(STORAGE_QUEUE_KEY);
+        if (storedQueue) {
+          try {
+            const parsed = JSON.parse(storedQueue);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setQueue(parsed);
+            }
+          } catch (e) {
+            console.error("Erro ao carregar fila persistente:", e);
+          }
+        }
+      } else {
+        loadLiveQueue();
       }
     }
   }, []);
 
-  // Salva no localStorage para persistência definitiva (sem reset ao navegar ou atualizar)
+  // Salva no localStorage em modo mock
   const persistQueue = (updatedQueue: QueueItem[]) => {
     setQueue(updatedQueue);
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && IS_API_MOCK_MODE) {
       localStorage.setItem(STORAGE_QUEUE_KEY, JSON.stringify(updatedQueue));
     }
   };
 
   // Ações do Servidor
-  const handleStartAttendance = (id: string) => {
+  const handleStartAttendance = async (id: string) => {
+    if (!IS_API_MOCK_MODE) {
+      try {
+        await updateAppointmentStatus(id, "in_progress", "Cidadão chamado no guichê.");
+        setQueue((prev) => prev.map((item) => (item.id === id ? { ...item, status: "in_progress" as const } : item)));
+      } catch (err: unknown) {
+        const problem = err as ProblemDetails;
+        setQueueError(problem?.detail || "Falha ao atualizar status para Em Atendimento.");
+      }
+      return;
+    }
     const updated = queue.map((item) =>
       item.id === id ? { ...item, status: "in_progress" as const } : item
     );
     persistQueue(updated);
   };
 
-  const handleCompleteAttendance = (id: string) => {
+  const handleCompleteAttendance = async (id: string) => {
+    if (!IS_API_MOCK_MODE) {
+      try {
+        await updateAppointmentStatus(id, "completed", "Atendimento presencial concluído.");
+        setQueue((prev) => prev.map((item) => (item.id === id ? { ...item, status: "completed" as const } : item)));
+      } catch (err: unknown) {
+        const problem = err as ProblemDetails;
+        setQueueError(problem?.detail || "Falha ao concluir atendimento.");
+      }
+      return;
+    }
     const updated = queue.map((item) =>
       item.id === id ? { ...item, status: "completed" as const } : item
     );
     persistQueue(updated);
   };
 
-  const handleConfirmNoShow = () => {
+  const handleConfirmNoShow = async () => {
     if (!noShowItem) return;
+    if (!IS_API_MOCK_MODE) {
+      try {
+        await updateAppointmentStatus(noShowItem.id, "no_show", "Não comparecimento registrado pelo servidor.");
+        setQueue((prev) => prev.map((item) => (item.id === noShowItem.id ? { ...item, status: "no_show" as const } : item)));
+      } catch (err: unknown) {
+        const problem = err as ProblemDetails;
+        setQueueError(problem?.detail || "Falha ao registrar não comparecimento.");
+      }
+      setNoShowItem(null);
+      return;
+    }
     const updated = queue.map((item) =>
       item.id === noShowItem.id ? { ...item, status: "no_show" as const } : item
     );
@@ -160,8 +237,19 @@ export default function ServerDashboardPage() {
     setNoShowItem(null);
   };
 
-  const handleConfirmCancel = () => {
+  const handleConfirmCancel = async () => {
     if (!cancelItem) return;
+    if (!IS_API_MOCK_MODE) {
+      try {
+        await updateAppointmentStatus(cancelItem.id, "cancelled", "Cancelado operacionalmente pelo servidor.");
+        setQueue((prev) => prev.map((item) => (item.id === cancelItem.id ? { ...item, status: "cancelled" as const } : item)));
+      } catch (err: unknown) {
+        const problem = err as ProblemDetails;
+        setQueueError(problem?.detail || "Falha ao cancelar agendamento.");
+      }
+      setCancelItem(null);
+      return;
+    }
     const updated = queue.map((item) =>
       item.id === cancelItem.id ? { ...item, status: "cancelled" as const } : item
     );
@@ -170,6 +258,10 @@ export default function ServerDashboardPage() {
   };
 
   const handleResetQueue = () => {
+    if (!IS_API_MOCK_MODE) {
+      loadLiveQueue();
+      return;
+    }
     persistQueue(INITIAL_QUEUE);
   };
 

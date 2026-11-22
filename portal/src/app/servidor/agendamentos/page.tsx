@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Calendar as CalendarIcon,
@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
+import { IS_API_MOCK_MODE, getOperationalAppointments } from "@/services/apiClient";
+import type { ProblemDetails } from "@/types/api";
 
 interface AppointmentItem {
   id: string;
@@ -86,9 +88,47 @@ const APPOINTMENTS_LIST: AppointmentItem[] = [
 ];
 
 export default function ServerAppointmentsPage() {
-  const [appointments, setAppointments] = useState<AppointmentItem[]>(APPOINTMENTS_LIST);
+  const [appointments, setAppointments] = useState<AppointmentItem[]>(IS_API_MOCK_MODE ? APPOINTMENTS_LIST : []);
+  const [isLoading, setIsLoading] = useState<boolean>(!IS_API_MOCK_MODE);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  useEffect(() => {
+    if (IS_API_MOCK_MODE) return;
+    let active = true;
+    async function load() {
+      setIsLoading(true);
+      setErrorMessage(null);
+      try {
+        const data = await getOperationalAppointments();
+        if (!active) return;
+        setAppointments(
+          data.map((a) => ({
+            id: a.id,
+            protocol: a.protocolNumber,
+            citizenName: a.citizenName,
+            citizenCpf: a.citizenCpfMasked,
+            serviceName: a.serviceName,
+            date: a.scheduledDate,
+            time: a.scheduledTime,
+            unitName: a.unitName,
+            status: a.status,
+          }))
+        );
+      } catch (err: unknown) {
+        if (!active) return;
+        const problem = err as ProblemDetails;
+        setErrorMessage(problem?.detail || "Não foi possível carregar os agendamentos da unidade.");
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = appointments.filter((item) => {
     if (statusFilter !== "all" && item.status !== statusFilter) return false;

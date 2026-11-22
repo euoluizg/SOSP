@@ -47,17 +47,11 @@ class SchedulingService:
         capacity_per_slot = 4
         slots: List[Dict[str, Any]] = []
 
-        # Contabiliza agendamentos existentes nesta data e unidade
-        all_appts = scheduling_repository.list_all()
-        day_appts = [
-            a for a in all_appts
-            if a.get("unitId") == unit_id
-            and a.get("scheduledDate") == date_str
-            and a.get("status") == "scheduled"
-        ]
+        # Contabiliza reservas reais via tabela pública schedulingSlot (ou agendamentos em memória)
+        booked_by_time = scheduling_repository.get_slot_bookings(unit_id, date_str)
 
         for start_t, end_t in slot_times:
-            booked = sum(1 for a in day_appts if a.get("scheduledTime") == start_t)
+            booked = int(booked_by_time.get(start_t, 0))
             is_available = booked < capacity_per_slot
             slots.append({
                 "slotDate": date_str,
@@ -69,6 +63,43 @@ class SchedulingService:
             })
 
         return slots
+
+    @staticmethod
+    def update_appointment_status(
+        appointment_id: str,
+        new_status: str,
+        user: Any = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Transiciona status operacional do agendamento (RF-08 / RF-09) com auditoria."""
+        appt = scheduling_repository.get_by_id(appointment_id)
+        if not appt:
+            raise ProblemDetailsException(detail="Agendamento não encontrado.", status_code=404)
+
+        before_state = dict(appt)
+        normalized = "confirmed" if new_status == "in_progress" else ("no_show" if new_status == "noShow" else new_status)
+        appt["status"] = normalized
+        if normalized == "cancelled" and note:
+            appt["cancelReason"] = note
+        appt["_actorId"] = str(getattr(user, "id", "") or "")
+        appt["_actorType"] = "servant"
+        appt["_transitionNote"] = note or f"Status alterado para '{normalized}' pelo atendente."
+
+        saved = scheduling_repository.save(appt)
+        try:
+            from apps.audit.services import AuditService
+            AuditService.record_event(
+                action="UPDATE" if normalized != "cancelled" else "CANCEL",
+                actor_user_id=str(getattr(user, "id", "system") or "system"),
+                target_table="schedulingAppointment",
+                target_id=str(appointment_id),
+                before_state={"status": before_state.get("status")},
+                after_state={"status": saved.get("status"), "protocolNumber": saved.get("protocolNumber")},
+                detail=f"Protocolo {saved.get('protocolNumber')}: status alterado de '{before_state.get('status')}' para '{saved.get('status')}'.",
+            )
+        except Exception:
+            pass
+        return saved
 
     @staticmethod
     def create_appointment(

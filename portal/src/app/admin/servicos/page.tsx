@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
-import { getServices } from "@/services/apiClient";
+import { getServices, deactivateService } from "@/services/apiClient";
 import type { Service } from "@/types/api";
 
 export default function AdminServicesPage() {
@@ -41,11 +41,16 @@ export default function AdminServicesPage() {
     load();
   }, []);
 
-  const handleConfirmDeactivate = () => {
+  const handleConfirmDeactivate = async () => {
     if (!deactivatingService) return;
-    // Exclusão Lógica Obrigatória (RN-40, RS-05)
-    setServices((prev) => prev.filter((s) => s.id !== deactivatingService.id));
-    setDeactivatingService(null);
+    try {
+      await deactivateService(deactivatingService.id);
+      setServices((prev) => prev.filter((s) => s.id !== deactivatingService.id));
+    } catch (err) {
+      console.error("Erro ao desativar serviço:", err);
+    } finally {
+      setDeactivatingService(null);
+    }
   };
 
   const filteredServices = services.filter((s) => {
