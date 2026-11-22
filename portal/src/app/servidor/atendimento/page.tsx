@@ -1,43 +1,141 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   FileCheck,
   CheckCircle2,
   AlertCircle,
-  XCircle,
-  Clock,
-  User,
-  MapPin,
   ArrowLeft,
   ChevronRight,
-  Shield,
-  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
+import { Skeleton } from "@/components/ui/Skeleton";
+import {
+  getAppointmentByProtocol,
+  getOperationalAppointments,
+  getServiceById,
+  updateAppointmentStatus,
+} from "@/services/apiClient";
+import type { Appointment, ProblemDetails } from "@/types/api";
 
-export default function ServerAttendancePage() {
-  const [protocolNumber, setProtocolNumber] = useState("20261105-1042");
-  const [checkedDocs, setCheckedDocs] = useState<Record<string, boolean>>({
-    doc1: true,
-    doc2: true,
-    doc3: false,
-  });
+interface DocCheckItem {
+  id: string;
+  name: string;
+}
+
+const FALLBACK_DOCS: DocCheckItem[] = [
+  { id: "doc1", name: "Documento Oficial com Foto (Original)" },
+  { id: "doc2", name: "Comprovante de Residência Atualizado" },
+  { id: "doc3", name: "Comprovante de Inscrição no CPF" },
+];
+
+function ServerAttendanceContent() {
+  const searchParams = useSearchParams();
+  const queryProtocol = searchParams.get("protocolo") || "";
+
+  const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [documents, setDocuments] = useState<DocCheckItem[]>(FALLBACK_DOCS);
+  const [checkedDocs, setCheckedDocs] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<"in_progress" | "completed" | "needs_doc">("in_progress");
 
-  const documents = [
-    { id: "doc1", name: "Certidão de Nascimento ou Casamento (Original e Cópia)" },
-    { id: "doc2", name: "Comprovante de Residência Atualizado (últimos 90 dias)" },
-    { id: "doc3", name: "Comprovante de Inscrição no CPF" },
-  ];
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setIsLoading(true);
+      setErrorMessage(null);
+      try {
+        let target: Appointment | null = null;
+        if (queryProtocol) {
+          target = await getAppointmentByProtocol(queryProtocol);
+        } else {
+          const queue = await getOperationalAppointments();
+          target =
+            queue.find((a) => a.status === "confirmed") ||
+            queue.find((a) => a.status === "scheduled") ||
+            queue[0] ||
+            null;
+        }
+        if (!active) return;
+        setAppointment(target);
+        if (target?.status === "completed") {
+          setStatus("completed");
+        }
+        if (target?.serviceId) {
+          const svc = await getServiceById(target.serviceId).catch(() => null);
+          if (active && svc && svc.documents && svc.documents.length > 0) {
+            setDocuments(svc.documents.map((d) => ({ id: d.id, name: d.name })));
+          }
+        }
+      } catch (err: unknown) {
+        if (!active) return;
+        const problem = err as ProblemDetails;
+        setErrorMessage(problem?.detail || "Não foi possível carregar o atendimento.");
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [queryProtocol]);
 
   const handleToggle = (id: string) => {
     setCheckedDocs((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const allChecked = Object.values(checkedDocs).every(Boolean);
+  const allChecked = documents.length > 0 && documents.every((d) => Boolean(checkedDocs[d.id]));
+
+  const handleComplete = async () => {
+    if (!appointment) return;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await updateAppointmentStatus(
+        appointment.id,
+        "completed",
+        "Documentação conferida e atendimento finalizado no guichê."
+      );
+      setStatus("completed");
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setErrorMessage(problem?.detail || "Erro ao finalizar o atendimento.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[1000px] mx-auto space-y-6" aria-busy="true">
+          <Skeleton className="h-28 w-full rounded-2xl" />
+          <Skeleton className="h-64 w-full rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!appointment) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-16 px-4 text-center">
+        <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+        <h1 className="text-xl font-bold text-gray-900">Nenhum atendimento ativo selecionado</h1>
+        <p className="text-sm text-gray-600 mt-1 max-w-md mx-auto">
+          {errorMessage || "Selecione um protocolo na fila do painel do servidor para iniciar o atendimento."}
+        </p>
+        <Link href="/servidor/painel" className="mt-6 inline-block">
+          <Button variant="primary">Ir para o Painel do Servidor</Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -59,14 +157,14 @@ export default function ServerAttendancePage() {
                 {status === "completed" ? "Atendimento Concluído" : "Em Atendimento"}
               </Tag>
               <span className="text-xs font-mono font-bold text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded">
-                Protocolo: {protocolNumber}
+                Protocolo: {appointment.protocolNumber}
               </span>
             </div>
             <h1 className="text-2xl font-extrabold text-gray-900 mt-1">
-              Emitir Carteira de Identidade Nacional (CIN)
+              {appointment.serviceName}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              Cidadão: <strong>Carlos Eduardo Santos (CPF ***.789.012-**)</strong>
+              Cidadão: <strong>{appointment.citizenName} (CPF {appointment.citizenCpfMasked})</strong> · {appointment.unitName}
             </p>
           </div>
 
@@ -78,6 +176,12 @@ export default function ServerAttendancePage() {
           </Link>
         </div>
 
+        {errorMessage && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {errorMessage}
+          </div>
+        )}
+
         {status === "completed" ? (
           <div className="bg-white rounded-2xl p-8 shadow-sm border border-green-200 text-center animate-fadeIn">
             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -85,7 +189,7 @@ export default function ServerAttendancePage() {
             </div>
             <h2 className="text-xl font-bold text-gray-900">Atendimento Finalizado com Sucesso!</h2>
             <p className="mt-2 text-sm text-gray-600 max-w-md mx-auto">
-              A biometria e a documentação do cidadão foram validadas no sistema. O protocolo foi atualizado para status "Concluído".
+              A documentação do cidadão foi validada e o protocolo {appointment.protocolNumber} foi gravado como concluído no sistema.
             </p>
             <div className="mt-6">
               <Link href="/servidor/painel">
@@ -141,29 +245,30 @@ export default function ServerAttendancePage() {
             </div>
 
             {/* Ações do Atendente */}
-            <div className="flex flex-col sm:flex-row justify-between gap-3 pt-2">
-              <Button
-                variant="secondary"
-                onClick={() => alert("Solicitação de documento pendente enviada por e-mail (UC-12).")}
-                className="text-amber-700 border-amber-300 hover:bg-amber-50"
-              >
-                Solicitar Complementação de Anexos
-              </Button>
-
+            <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">
               <Button
                 variant="primary"
-                onClick={() => setStatus("completed")}
-                disabled={!allChecked}
+                onClick={handleComplete}
+                disabled={!allChecked || isSubmitting}
+                isLoading={isSubmitting}
                 className="px-8 shadow-md"
               >
                 <CheckCircle2 className="w-4 h-4 mr-2" />
-                Concluir e Emitir Documento
+                Concluir Atendimento
               </Button>
             </div>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+export default function ServerAttendancePage() {
+  return (
+    <Suspense fallback={<div className="max-w-[1000px] mx-auto py-10 px-4"><Skeleton className="h-40 w-full rounded-2xl" /></div>}>
+      <ServerAttendanceContent />
+    </Suspense>
   );
 }
 

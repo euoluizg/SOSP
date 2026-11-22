@@ -77,6 +77,18 @@ class SchedulingInMemoryRepository:
         self._appointments.insert(0, data)
         return data
 
+    def get_slot_bookings(self, unit_id: str, slot_date: str) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for a in self._appointments:
+            if (
+                a.get("unitId") == unit_id
+                and a.get("scheduledDate") == slot_date
+                and a.get("status") in ("scheduled", "confirmed")
+            ):
+                t = a.get("scheduledTime", "")
+                counts[t] = counts.get(t, 0) + 1
+        return counts
+
     def add_attachment(self, protocol_number: str, attachment: Dict[str, Any]) -> None:
         if protocol_number not in self._attachments:
             self._attachments[protocol_number] = []
@@ -85,40 +97,81 @@ class SchedulingInMemoryRepository:
     def get_attachments(self, protocol_number: str) -> List[Dict[str, Any]]:
         return self._attachments.get(protocol_number, [])
 
+_API_TO_DB_STATUS = {
+    "scheduled": "scheduled",
+    "waiting": "scheduled",
+    "confirmed": "confirmed",
+    "in_progress": "confirmed",
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "no_show": "noShow",
+    "noShow": "noShow",
+}
+
+_DB_TO_API_STATUS = {
+    "scheduled": "scheduled",
+    "confirmed": "confirmed",
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "noShow": "no_show",
+}
+
+_APPT_TO_PROTOCOL_STATUS = {
+    "scheduled": "scheduled",
+    "confirmed": "inReview",
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "noShow": "cancelled",
+}
+
+
 class SchedulingDjangoORMRepository:
     """Implementação real de persistência PostgreSQL via Django ORM com bloqueio transacional (ADR-001 / Etapa 3)."""
 
     def get_by_id(self, appointment_id: str) -> Optional[Dict[str, Any]]:
         from .models import Appointment
         try:
-            appt = Appointment.objects.filter(id=appointment_id).select_related("citizen", "service", "unit").first()
+            appt = Appointment.objects.filter(id=appointment_id).select_related("citizen", "service", "unit", "unit__agency").first()
             return self._to_dict(appt) if appt else None
         except Exception:
             return None
 
     def get_by_protocol(self, protocol_number: str) -> Optional[Dict[str, Any]]:
         from .models import Appointment
-        appt = Appointment.objects.filter(protocol_number=protocol_number).select_related("citizen", "service", "unit").first()
+        appt = Appointment.objects.filter(protocol_number=protocol_number).select_related("citizen", "service", "unit", "unit__agency").first()
         return self._to_dict(appt) if appt else None
 
     def list_by_citizen(self, citizen_id: str) -> List[Dict[str, Any]]:
         from .models import Appointment
         try:
-            appts = Appointment.objects.filter(citizen_id=citizen_id).select_related("citizen", "service", "unit").order_by("-created_at")
+            appts = Appointment.objects.filter(citizen_id=citizen_id).select_related("citizen", "service", "unit", "unit__agency").order_by("-created_at")
             return [self._to_dict(a) for a in appts]
         except Exception:
             return []
 
     def list_all(self) -> List[Dict[str, Any]]:
         from .models import Appointment
-        appts = Appointment.objects.all().select_related("citizen", "service", "unit").order_by("-created_at")
+        appts = Appointment.objects.all().select_related("citizen", "service", "unit", "unit__agency").order_by("-scheduled_date", "scheduled_time")
         return [self._to_dict(a) for a in appts]
 
+    def get_slot_bookings(self, unit_id: str, slot_date: str) -> Dict[str, int]:
+        from .models import Slot
+        try:
+            target_date = datetime.date.fromisoformat(slot_date)
+            slots = Slot.objects.filter(unit_id=unit_id, slot_date=target_date)
+            return {
+                s.starts_at.strftime("%H:%M"): int(s.booked_count)
+                for s in slots
+            }
+        except Exception:
+            return {}
+
     def save(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        from .models import Appointment, Protocol, Slot
+        from .models import Appointment, Protocol, ProtocolTransition, Slot
         from apps.catalog.models import Service, Unit
         from apps.accounts.models import Citizen
         from django.db import transaction
+        from django.utils import timezone
         from common.exceptions import ProblemDetailsException
 
         with transaction.atomic():
@@ -126,22 +179,22 @@ class SchedulingDjangoORMRepository:
             appt = None
             if appt_id:
                 try:
-                    appt = Appointment.objects.filter(id=appt_id).first()
+                    appt = Appointment.objects.filter(id=appt_id).select_related("citizen", "service", "unit", "unit__agency").first()
                 except Exception:
                     pass
 
+            db_status = _API_TO_DB_STATUS.get(data.get("status", "scheduled"), "scheduled")
+
             if not appt:
-                # Recupera e valida chaves estrangeiras
                 service = Service.objects.filter(id=data["serviceId"]).first()
-                unit = Unit.objects.filter(id=data["unitId"]).first()
+                unit = Unit.objects.filter(id=data["unitId"]).select_related("agency").first()
                 citizen = Citizen.objects.filter(id=data["citizenId"]).first()
 
                 if not service or not unit or not citizen:
-                    # Em caso de dados de mock passados em testes, busca ou associa entidades mínimas
                     if not citizen:
                         citizen = Citizen.objects.first()
                     if not unit:
-                        unit = Unit.objects.first()
+                        unit = Unit.objects.select_related("agency").first()
                     if not service:
                         service = Service.objects.first()
 
@@ -153,7 +206,6 @@ class SchedulingDjangoORMRepository:
                     parts = slot_time.split(":")
                     slot_time = datetime.time(int(parts[0]), int(parts[1]))
 
-                # Bloqueio transacional de concorrência com select_for_update() (RN-18)
                 slot = Slot.objects.select_for_update().filter(
                     unit=unit, slot_date=slot_date, starts_at=slot_time
                 ).first()
@@ -168,14 +220,13 @@ class SchedulingDjangoORMRepository:
                     slot.booked_count += 1
                     slot.save(update_fields=["booked_count", "updated_at"])
                 else:
-                    # Cria slot garantindo que a constraint NOT NULL de slotId seja satisfeita
                     end_dt = datetime.datetime.combine(slot_date, slot_time) + datetime.timedelta(minutes=30)
                     slot = Slot.objects.create(
                         unit=unit,
                         slot_date=slot_date,
                         starts_at=slot_time,
                         ends_at=end_dt.time(),
-                        capacity=10,
+                        capacity=4,
                         booked_count=1,
                     )
 
@@ -187,22 +238,61 @@ class SchedulingDjangoORMRepository:
                     slot=slot,
                     scheduled_date=slot_date,
                     scheduled_time=slot_time,
-                    status=data.get("status", "scheduled"),
+                    status=db_status,
                     cancellation_reason=data.get("cancelReason"),
                 )
 
-                # Cria o Protocol imutável associado (RF-08, RF-09)
-                Protocol.objects.create(
+                proto = Protocol.objects.create(
                     protocol_number=data["protocolNumber"],
                     protocol_type="appointment",
                     citizen=citizen,
                     appointment=appt,
-                    status="received",
+                    status="scheduled",
+                )
+                ProtocolTransition.objects.create(
+                    protocol=proto,
+                    from_status=None,
+                    to_status="scheduled",
+                    actor_type="citizen",
+                    actor_id=citizen.id if citizen else None,
+                    note="Agendamento presencial registrado no SOSP.",
                 )
             else:
-                appt.status = data.get("status", appt.status)
+                prev_db_status = appt.status
+                appt.status = db_status
                 appt.cancellation_reason = data.get("cancelReason", appt.cancellation_reason)
                 appt.save()
+
+                if prev_db_status != db_status:
+                    if db_status == "cancelled" and appt.slot_id:
+                        slot_obj = Slot.objects.select_for_update().filter(id=appt.slot_id).first()
+                        if slot_obj and slot_obj.booked_count > 0:
+                            slot_obj.booked_count -= 1
+                            slot_obj.save(update_fields=["booked_count", "updated_at"])
+
+                    proto = Protocol.objects.filter(appointment=appt).first()
+                    if proto:
+                        old_p_status = proto.status
+                        new_p_status = _APPT_TO_PROTOCOL_STATUS.get(db_status, "inReview")
+                        proto.status = new_p_status
+                        if new_p_status in ("completed", "cancelled"):
+                            proto.closed_at = timezone.now()
+                        proto.save()
+                        actor_id = data.get("_actorId")
+                        actor_uuid = None
+                        if actor_id:
+                            try:
+                                actor_uuid = uuid.UUID(str(actor_id))
+                            except Exception:
+                                actor_uuid = None
+                        ProtocolTransition.objects.create(
+                            protocol=proto,
+                            from_status=old_p_status,
+                            to_status=new_p_status,
+                            actor_type=data.get("_actorType", "servant"),
+                            actor_id=actor_uuid,
+                            note=data.get("_transitionNote") or data.get("cancelReason") or f"Status atualizado para {db_status}.",
+                        )
 
             return self._to_dict(appt)
 
@@ -212,13 +302,27 @@ class SchedulingDjangoORMRepository:
         if not proto:
             return
 
+        allowed_mimes = ("image/jpeg", "image/png", "application/pdf")
+        mime_type = attachment.get("mimeType") or "application/pdf"
+        if mime_type not in allowed_mimes:
+            fname = str(attachment.get("fileName", "")).lower()
+            if fname.endswith(".png"):
+                mime_type = "image/png"
+            elif fname.endswith((".jpg", ".jpeg")):
+                mime_type = "image/jpeg"
+            else:
+                mime_type = "application/pdf"
+
+        raw_size = int(attachment.get("fileSize") or 0)
+        safe_size = max(1024, min(raw_size if raw_size > 0 else 1024, 10485760))
+
         ProtocolAttachment.objects.create(
             protocol=proto,
             citizen=proto.citizen,
-            file_name=attachment.get("fileName", "anexo"),
-            file_size=attachment.get("fileSize", 0),
-            mime_type=attachment.get("mimeType", "application/pdf"),
-            storage_key=attachment.get("s3Key", f"attachments/{protocol_number}"),
+            file_name=str(attachment.get("fileName", "anexo.pdf"))[:255],
+            file_size=safe_size,
+            mime_type=mime_type,
+            storage_key=attachment.get("s3Key", f"attachments/{protocol_number}/{attachment.get('fileName', 'anexo.pdf')}")[:500],
             antivirus_status="clean",
         )
 
@@ -232,17 +336,20 @@ class SchedulingDjangoORMRepository:
                 "fileName": a.file_name,
                 "fileSize": a.file_size,
                 "mimeType": a.mime_type,
+                "contentType": a.mime_type,
                 "uploadedAt": a.created_at.isoformat(),
             }
             for a in atts
         ]
 
     def _to_dict(self, a) -> Dict[str, Any]:
-        unit_name = a.unit.name if getattr(a, "unit", None) else "Central Já!"
+        unit = getattr(a, "unit", None)
+        agency = getattr(unit, "agency", None) if unit else None
+        unit_name = unit.name if unit else "Central Já!"
         service_name = a.service.name if getattr(a, "service", None) else "Serviço"
         citizen_name = a.citizen.full_name if getattr(a, "citizen", None) else "Cidadão"
         citizen_cpf = a.citizen.cpf if getattr(a, "citizen", None) else "00000000000"
-        masked_cpf = f"***.{citizen_cpf[3:6]}.***-**" if len(citizen_cpf) == 11 else "***.***.***-**"
+        masked_cpf = f"***.{citizen_cpf[3:6]}.{citizen_cpf[6:9]}-**" if len(citizen_cpf) == 11 else "***.***.***-**"
 
         return {
             "id": str(a.id),
@@ -252,14 +359,14 @@ class SchedulingDjangoORMRepository:
             "citizenCpfMasked": masked_cpf,
             "serviceId": str(a.service_id),
             "serviceName": service_name,
-            "agencyId": str(getattr(a.unit, "agency_id", None) or getattr(a.service, "agency_id", "") or "orgao-ssp"),
-            "agencyName": "Governo de Alagoas",
+            "agencyId": str(getattr(unit, "agency_id", None) or getattr(a.service, "agency_id", "") or "orgao-ssp"),
+            "agencyName": agency.name if agency else "Governo de Alagoas",
             "unitId": str(a.unit_id),
             "unitName": unit_name,
-            "unitAddress": f"{getattr(a.unit, 'street', '')}, {getattr(a.unit, 'address_number', '')} - {getattr(a.unit, 'city', '')}",
+            "unitAddress": f"{getattr(unit, 'street', '')}, {getattr(unit, 'address_number', '')} - {getattr(unit, 'city', '')}",
             "scheduledDate": a.scheduled_date.isoformat() if hasattr(a.scheduled_date, "isoformat") else str(a.scheduled_date),
             "scheduledTime": a.scheduled_time.strftime("%H:%M") if hasattr(a.scheduled_time, "strftime") else str(a.scheduled_time)[:5],
-            "status": a.status,
+            "status": _DB_TO_API_STATUS.get(a.status, a.status),
             "cancelReason": a.cancellation_reason,
             "cancelledAt": a.updated_at.isoformat() if a.status == "cancelled" else None,
             "createdAt": a.created_at.isoformat() if a.created_at else None,

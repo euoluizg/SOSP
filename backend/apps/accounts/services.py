@@ -261,6 +261,7 @@ class AccountService:
                 "cpf": citizen["cpf"],
                 "email": citizen["email"],
                 "role": citizen.get("role", "citizen"),
+                "registrationNumber": citizen.get("registrationNumber"),
                 "agencyId": citizen.get("agencyId"),
                 "unitId": citizen.get("unitId"),
                 "mustChangePassword": must_change_pwd,
@@ -278,6 +279,26 @@ class AccountService:
         # Gera código aleatório criptograficamente seguro de 6 dígitos
         code = f"{secrets.randbelow(900000) + 100000}"
         citizen_repository.set_recovery_code(clean_cpf, code)
+
+        # Disparo de e-mail transacional via Django SMTP (RF-02) quando configurado
+        recipient_email = citizen.get("email")
+        if recipient_email and getattr(settings, "EMAIL_HOST", ""):
+            try:
+                from django.core.mail import send_mail
+                send_mail(
+                    subject="SOSP — Código de Recuperação de Senha",
+                    message=(
+                        f"Olá, {citizen.get('fullName', 'Cidadão')}.\n\n"
+                        f"Seu código de verificação para redefinição de senha no SOSP é: {code}\n"
+                        "Este código é válido por 15 minutos.\n\n"
+                        "Se você não solicitou esta alteração, ignore esta mensagem."
+                    ),
+                    from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@sosp.al.gov.br"),
+                    recipient_list=[recipient_email],
+                    fail_silently=False,
+                )
+            except Exception as mail_err:
+                logger.error("Falha ao enviar e-mail de recuperação de senha (RF-02): %s", mail_err)
 
         res: Dict[str, str] = {
             "message": "Código de verificação enviado por e-mail com sucesso."
@@ -457,4 +478,70 @@ class AccountService:
             "token": new_token,
             "mustChangePassword": False,
         }
+
+    @staticmethod
+    def list_internal_users() -> List[Dict[str, Any]]:
+        return citizen_repository.list_internal_users()
+
+    @staticmethod
+    def create_internal_user(data: Dict[str, Any], actor_user: Any = None) -> Dict[str, Any]:
+        temp_password = (data.get("temporaryPassword") or "").strip()
+        if not temp_password:
+            temp_password = f"Sosp@{secrets.randbelow(900000) + 100000}!"
+
+        valid_pwd, pwd_errors = validate_password_strength(temp_password)
+        if not valid_pwd:
+            raise ProblemDetailsException(
+                detail="A senha provisória não atende aos requisitos mínimos de segurança.",
+                title="Senha Fraca",
+                status_code=400,
+                errors=[{"field": "temporaryPassword", "message": err} for err in pwd_errors],
+            )
+
+        payload = dict(data)
+        payload["passwordHash"] = make_password(temp_password)
+        created = citizen_repository.create_internal_user(payload)
+
+        try:
+            from apps.audit.services import AuditService
+            AuditService.record_event(
+                action="CREATE",
+                actor_user_id=str(getattr(actor_user, "id", "system") or "system"),
+                target_table="accountsInternalUser",
+                target_id=created["id"],
+                after_state=created,
+                detail=f"Usuário interno '{created['fullName']}' ({created['role']}) provisionado com troca obrigatória no 1º acesso.",
+            )
+        except Exception:
+            pass
+        return created
+
+    @staticmethod
+    def deactivate_internal_user(user_id: str, actor_user: Any = None) -> Dict[str, Any]:
+        if actor_user and str(getattr(actor_user, "id", "")) == str(user_id):
+            raise ProblemDetailsException(
+                detail="Um administrador não pode desativar sua própria conta ativa.",
+                title="Operação Não Permitida",
+                status_code=400,
+            )
+        deactivated = citizen_repository.deactivate_internal_user(user_id)
+        if not deactivated:
+            raise ProblemDetailsException(
+                detail="Usuário interno não encontrado.",
+                title="Usuário não encontrado",
+                status_code=404,
+            )
+        try:
+            from apps.audit.services import AuditService
+            AuditService.record_event(
+                action="DEACTIVATE",
+                actor_user_id=str(getattr(actor_user, "id", "system") or "system"),
+                target_table="accountsInternalUser",
+                target_id=str(user_id),
+                after_state=deactivated,
+                detail=f"Desativação lógica (isActive=false, deletedAt=NOW()) de '{deactivated['fullName']}'.",
+            )
+        except Exception:
+            pass
+        return deactivated
 

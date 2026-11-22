@@ -1,21 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ShieldAlert,
   Search,
-  Filter,
   Download,
-  Calendar,
-  Lock,
   ChevronRight,
-  User,
-  Clock,
-  ArrowLeft,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Tag } from "@/components/ui/Tag";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { getAuditEvents } from "@/services/apiClient";
+import type { ProblemDetails } from "@/types/api";
 
 interface AuditLog {
   id: string;
@@ -28,63 +26,55 @@ interface AuditLog {
   details: string;
 }
 
-const INITIAL_LOGS: AuditLog[] = [
-  {
-    id: "aud-001",
-    actor: "João Servidor Central (Atendente)",
-    action: "UPDATE",
-    targetTable: "schedulingAppointment",
-    targetId: "20261105-1001",
-    ipAddress: "192.168.10.45",
-    timestamp: "2026-11-05T10:15:22Z",
-    details: "Status alterado de 'in_progress' para 'completed'.",
-  },
-  {
-    id: "aud-002",
-    actor: "Cidadão (CPF ***.456.789-**)",
-    action: "CREATE",
-    targetTable: "schedulingAppointment",
-    targetId: "20261105-1042",
-    ipAddress: "177.135.22.8",
-    timestamp: "2026-11-05T09:40:11Z",
-    details: "Novo agendamento criado para 'Emitir CIN' na unidade Centro.",
-  },
-  {
-    id: "aud-003",
-    actor: "Mozart Melo (Admin)",
-    action: "DEACTIVATE",
-    targetTable: "accountsUser",
-    targetId: "user-4",
-    ipAddress: "10.0.0.2",
-    timestamp: "2026-11-05T08:30:00Z",
-    details: "Desativação lógica (isActive=false, deletedAt=NOW()) de servidor.",
-  },
-  {
-    id: "aud-004",
-    actor: "Sistema SOSP (Auth)",
-    action: "LOGIN",
-    targetTable: "accountsCitizen",
-    targetId: "citizen-001",
-    ipAddress: "189.12.88.102",
-    timestamp: "2026-11-05T08:12:44Z",
-    details: "Autenticação bem-sucedida via CPF + Argon2id.",
-  },
-  {
-    id: "aud-005",
-    actor: "Cidadão (CPF ***.789.012-**)",
-    action: "CANCEL",
-    targetTable: "schedulingAppointment",
-    targetId: "20261104-9821",
-    ipAddress: "177.135.22.8",
-    timestamp: "2026-11-04T16:20:10Z",
-    details: "Cancelamento voluntário realizado com antecedência > 24h (RN-22).",
-  },
-];
+function normalizeAuditAction(raw: string): AuditLog["action"] {
+  const upper = (raw || "").toUpperCase();
+  if (upper.includes("CREATE")) return "CREATE";
+  if (upper.includes("DEACTIVATE") || upper.includes("DELETE")) return "DEACTIVATE";
+  if (upper.includes("CANCEL")) return "CANCEL";
+  if (upper.includes("LOGIN") || upper.includes("AUTH")) return "LOGIN";
+  return "UPDATE";
+}
 
 export default function AdminAuditPage() {
-  const [logs, setLogs] = useState<AuditLog[]>(INITIAL_LOGS);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("all");
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setIsLoading(true);
+      setErrorMessage(null);
+      try {
+        const events = await getAuditEvents();
+        if (!active) return;
+        setLogs(
+          events.map((e) => ({
+            id: e.id,
+            actor: e.actorUserId || "system",
+            action: normalizeAuditAction(e.action),
+            targetTable: e.targetTable,
+            targetId: e.targetId || "-",
+            ipAddress: e.ipAddress || "127.0.0.1",
+            timestamp: e.createdAt,
+            details: e.detail || e.action,
+          }))
+        );
+      } catch (err: unknown) {
+        if (!active) return;
+        const problem = err as ProblemDetails;
+        setErrorMessage(problem?.detail || "Não foi possível carregar os registros de auditoria.");
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredLogs = logs.filter((log) => {
     if (actionFilter !== "all" && log.action !== actionFilter) return false;
@@ -188,45 +178,64 @@ export default function AdminAuditPage() {
           </div>
         </div>
 
+        {errorMessage && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-sm text-red-700">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
         {/* Tabela de Logs */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs sm:text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-gray-600">
-                  <th className="py-3.5 px-6 font-semibold">Data / Hora (UTC)</th>
-                  <th className="py-3.5 px-6 font-semibold">Ator Responsável</th>
-                  <th className="py-3.5 px-6 font-semibold">Ação Executada</th>
-                  <th className="py-3.5 px-6 font-semibold">Tabela / ID Alvo</th>
-                  <th className="py-3.5 px-6 font-semibold">IP Origem</th>
-                  <th className="py-3.5 px-6 font-semibold">Descrição do Evento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 font-mono text-xs">
-                {filteredLogs.map((log) => {
-                  const badge = getActionBadge(log.action);
-                  return (
-                    <tr key={log.id} className="hover:bg-gray-50/70 transition-colors">
-                      <td className="py-3.5 px-6 text-gray-500 whitespace-nowrap">
-                        {log.timestamp.replace("T", " ").replace("Z", "")}
-                      </td>
-                      <td className="py-3.5 px-6 font-sans font-semibold text-gray-900 whitespace-nowrap">
-                        {log.actor}
-                      </td>
-                      <td className="py-3.5 px-6 font-sans">
-                        <Tag variant={badge.variant}>{badge.label}</Tag>
-                      </td>
-                      <td className="py-3.5 px-6 text-indigo-700 font-semibold whitespace-nowrap">
-                        {log.targetTable} ({log.targetId})
-                      </td>
-                      <td className="py-3.5 px-6 text-gray-600">{log.ipAddress}</td>
-                      <td className="py-3.5 px-6 font-sans text-gray-700">{log.details}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {isLoading ? (
+            <div className="p-6 space-y-3" aria-busy="true">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="p-10 text-center text-sm text-gray-500">
+              Nenhum evento de auditoria registrado até o momento para os filtros selecionados.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50 text-gray-600">
+                    <th className="py-3.5 px-6 font-semibold">Data / Hora (UTC)</th>
+                    <th className="py-3.5 px-6 font-semibold">Ator Responsável</th>
+                    <th className="py-3.5 px-6 font-semibold">Ação Executada</th>
+                    <th className="py-3.5 px-6 font-semibold">Tabela / ID Alvo</th>
+                    <th className="py-3.5 px-6 font-semibold">IP Origem</th>
+                    <th className="py-3.5 px-6 font-semibold">Descrição do Evento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-mono text-xs">
+                  {filteredLogs.map((log) => {
+                    const badge = getActionBadge(log.action);
+                    return (
+                      <tr key={log.id} className="hover:bg-gray-50/70 transition-colors">
+                        <td className="py-3.5 px-6 text-gray-500 whitespace-nowrap">
+                          {log.timestamp.replace("T", " ").replace("Z", "")}
+                        </td>
+                        <td className="py-3.5 px-6 font-sans font-semibold text-gray-900 whitespace-nowrap">
+                          {log.actor}
+                        </td>
+                        <td className="py-3.5 px-6 font-sans">
+                          <Tag variant={badge.variant}>{badge.label}</Tag>
+                        </td>
+                        <td className="py-3.5 px-6 text-indigo-700 font-semibold whitespace-nowrap">
+                          {log.targetTable} ({log.targetId})
+                        </td>
+                        <td className="py-3.5 px-6 text-gray-600">{log.ipAddress}</td>
+                        <td className="py-3.5 px-6 font-sans text-gray-700">{log.details}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

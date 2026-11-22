@@ -2,8 +2,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from common.security.permissions import HasChangedTemporaryPassword, IsServerUser
-from .serializers import CreateAppointmentSerializer, CancelAppointmentSerializer
+from common.security.permissions import HasChangedTemporaryPassword, IsInstitutionalUser, IsServerUser
+from .serializers import (
+    CreateAppointmentSerializer,
+    CancelAppointmentSerializer,
+    UpdateAppointmentStatusSerializer,
+)
 from .services import SchedulingService
 from .repositories import scheduling_repository
 from common.exceptions import ProblemDetailsException
@@ -103,6 +107,62 @@ class UnitSlotsView(APIView):
         return Response(slots, status=status.HTTP_200_OK)
 
 
+class InstitutionalAppointmentsListView(APIView):
+    """Lista agendamentos operacionais com escopo estrito de unidade/órgão (RN-36, ADR-003)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsInstitutionalUser]
+
+    def get(self, request):
+        user = request.user
+        user_role = getattr(user, "role", "citizen")
+        status_filter = request.query_params.get("status")
+        date_filter = request.query_params.get("date")
+
+        if user_role in ("server", "servant", "servidor", "gestor", "manager"):
+            server_unit = str(getattr(user, "unit_id", "") or "")
+            server_agency = str(getattr(user, "agency_id", "") or "")
+
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
+            all_appts = scheduling_repository.list_all()
+            if user_role in ("gestor", "manager"):
+                if not server_agency:
+                    raise ProblemDetailsException(
+                        detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                        status_code=403,
+                        title="Acesso não autorizado",
+                    )
+                appts = [a for a in all_appts if str(a.get("agencyId") or "") == server_agency]
+            elif server_unit:
+                appts = [a for a in all_appts if str(a.get("unitId") or "") == server_unit]
+            else:
+                raise ProblemDetailsException(
+                    detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+        elif user_role in ("admin", "administrator", "superadmin", "administrador"):
+            appts = scheduling_repository.list_all()
+        else:
+            raise ProblemDetailsException(
+                detail="Acesso não autorizado.",
+                status_code=403,
+                title="Acesso não autorizado",
+            )
+
+        if status_filter and status_filter != "all":
+            appts = [a for a in appts if a.get("status") == status_filter]
+        if date_filter:
+            appts = [a for a in appts if a.get("scheduledDate") == date_filter]
+
+        return Response(appts, status=status.HTTP_200_OK)
+
+
 class AppointmentCreateListView(APIView):
     permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
 
@@ -169,6 +229,31 @@ class AppointmentCancelView(APIView):
 
     def patch(self, request, appointment_id):
         return self.post(request, appointment_id)
+
+
+class AppointmentStatusUpdateView(APIView):
+    """Atualiza status operacional de um agendamento (Chamar, Concluir, Ausente, Cancelar — RF-08/RF-09)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsInstitutionalUser]
+
+    def patch(self, request, appointment_id):
+        appt = scheduling_repository.get_by_id(appointment_id)
+        if not appt:
+            raise ProblemDetailsException(detail="Agendamento não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+
+        serializer = UpdateAppointmentStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = SchedulingService.update_appointment_status(
+            appointment_id=appointment_id,
+            new_status=serializer.validated_data["status"],
+            user=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+        return Response(updated, status=status.HTTP_200_OK)
+
+    def post(self, request, appointment_id):
+        return self.patch(request, appointment_id)
 
 
 class AppointmentByProtocolView(APIView):
@@ -297,10 +382,22 @@ class ProtocolDocumentsUploadView(APIView):
         if not files:
             uploaded_name = request.data.get("fileName", "documento.pdf")
             size_mb = float(request.data.get("sizeMb", 1.5))
+            file_size_bytes = int(request.data.get("fileSize") or round(size_mb * 1024 * 1024))
+            mime_type = request.data.get("mimeType") or "application/pdf"
         else:
             f = files[0]
             uploaded_name = f.name
+            file_size_bytes = int(f.size)
             size_mb = f.size / (1024 * 1024)
+            mime_type = getattr(f, "content_type", None) or "application/pdf"
+
+        allowed_exts = (".pdf", ".jpg", ".jpeg", ".png")
+        if not str(uploaded_name).lower().endswith(allowed_exts):
+            raise ProblemDetailsException(
+                detail="Formato inválido. Permitido apenas PDF, JPG e PNG (RS-04).",
+                title="Formato não permitido",
+                status_code=400,
+            )
 
         if size_mb > 10.0:
             raise ProblemDetailsException(
@@ -309,13 +406,18 @@ class ProtocolDocumentsUploadView(APIView):
                 status_code=400,
             )
 
+        import datetime as _dt
+        import uuid as _uuid
         doc_record = {
-            "id": f"doc-{int(status.HTTP_200_OK)}",
+            "id": str(_uuid.uuid4()),
             "protocolNumber": protocol_number,
             "fileName": uploaded_name,
+            "fileSize": max(1024, file_size_bytes),
             "sizeMb": round(size_mb, 2),
-            "uploadedAt": "2026-11-05T12:00:00Z",
-            "url": f"/mock-storage/{uploaded_name}",
+            "mimeType": mime_type,
+            "s3Key": f"attachments/{protocol_number}/{uploaded_name}",
+            "uploadedAt": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "url": f"/api/v1/protocols/{protocol_number}/documents",
         }
         scheduling_repository.add_attachment(protocol_number, doc_record)
         return Response(doc_record, status=status.HTTP_201_CREATED)

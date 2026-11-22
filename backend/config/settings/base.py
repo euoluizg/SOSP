@@ -241,3 +241,16 @@ CORS_ALLOW_HEADERS = [
 
 APPEND_SLASH = False
 
+# E-mail Transacional SMTP (RF-01, RF-02, RF-08 — usa SMTP real quando EMAIL_HOST estiver configurado)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "").strip()
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").strip().lower() in ("true", "1", "yes")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SOSP Alagoas <no-reply@sosp.al.gov.br>")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+)
+

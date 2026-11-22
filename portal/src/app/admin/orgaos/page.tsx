@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
-import { getAgencies, updateAgency } from "@/services/apiClient";
+import { getAgencies, createAgency, updateAgency, deactivateAgency } from "@/services/apiClient";
 import type { Agency, ProblemDetails } from "@/types/api";
 
 export default function AdminAgenciesPage() {
@@ -72,22 +72,26 @@ export default function AdminAgenciesPage() {
     load();
   }, []);
 
-  const handleCreateAgency = (e: React.FormEvent) => {
+  const handleCreateAgency = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAgency.name || !newAgency.acronym) return;
 
-    const created: Agency = {
-      id: `agency-${Date.now()}`,
-      name: newAgency.name,
-      acronym: newAgency.acronym.toUpperCase(),
-      sphere: newAgency.sphere,
-      description: newAgency.description,
-      isActive: true,
-    };
-
-    setAgencies((prev) => [created, ...prev]);
-    setIsCreateModalOpen(false);
-    setNewAgency({ name: "", acronym: "", sphere: "state", description: "" });
+    try {
+      const created = await createAgency({
+        name: newAgency.name.trim(),
+        acronym: newAgency.acronym.trim().toUpperCase(),
+        sphere: newAgency.sphere,
+        description: newAgency.description.trim(),
+      });
+      setAgencies((prev) => [created, ...prev]);
+      setIsCreateModalOpen(false);
+      setNewAgency({ name: "", acronym: "", sphere: "state", description: "" });
+      setSuccessToast(`Órgão ${created.acronym} cadastrado com sucesso!`);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setEditError(problem?.detail || "Erro ao cadastrar órgão no servidor.");
+    }
   };
 
   const handleStartEdit = (agency: Agency) => {
@@ -140,15 +144,23 @@ export default function AdminAgenciesPage() {
     }
   };
 
-  const handleConfirmDeactivate = () => {
+  const handleConfirmDeactivate = async () => {
     if (!deactivatingAgency) return;
-    // Exclusão Lógica Obrigatória (RN-40, RS-05): isActive = false
-    setAgencies((prev) =>
-      prev.map((a) =>
-        a.id === deactivatingAgency.id ? { ...a, isActive: false } : a
-      )
-    );
-    setDeactivatingAgency(null);
+    try {
+      await deactivateAgency(deactivatingAgency.id);
+      setAgencies((prev) =>
+        prev.map((a) =>
+          a.id === deactivatingAgency.id ? { ...a, isActive: false } : a
+        )
+      );
+      setSuccessToast(`Órgão ${deactivatingAgency.acronym} desativado logicamente (RN-40).`);
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setEditError(problem?.detail || "Erro ao desativar órgão.");
+    } finally {
+      setDeactivatingAgency(null);
+    }
   };
 
   const filteredAgencies = agencies.filter((a) => {

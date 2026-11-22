@@ -45,7 +45,7 @@ class ReportsDjangoORMRepository:
             requested_by=req_uuid,
             report_type=export_type,
             filters=filters or {},
-            status="ready",
+            status="done",
             file_url=download_url,
             completed_at=timezone.now(),
         )

@@ -1,4 +1,18 @@
-import { Agency, Appointment, AppointmentSlot, CitizenProfile, LoginResponse, ProblemDetails, Protocol, Service, Unit, UserSession } from "@/types/api";
+import {
+  Agency,
+  Appointment,
+  AppointmentSlot,
+  AppointmentsReportSummary,
+  AuditLogEntry,
+  CitizenProfile,
+  InternalUserAccount,
+  LoginResponse,
+  ProblemDetails,
+  Protocol,
+  Service,
+  Unit,
+  UserSession,
+} from "@/types/api";
 import { MOCK_AGENCIES, MOCK_SERVICES, MOCK_UNITS } from "@/mocks/demoData";
 import {
   AUTH_TOKEN_KEY,
@@ -9,6 +23,7 @@ import {
 } from "@/utils/session";
 
 const USE_MOCK = process.env.NEXT_PUBLIC_API_MOCK !== "false";
+export const IS_API_MOCK_MODE = USE_MOCK;
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
 
 // Mock em memória para agendamentos do cidadão — Inicia estritamente vazio (Seção 8: Zero agendamentos fictícios)
@@ -21,8 +36,9 @@ export class ApiClient {
     if (typeof window !== "undefined") {
       authToken = localStorage.getItem(AUTH_TOKEN_KEY) || "";
     }
+    const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(options.headers as Record<string, string>),
@@ -73,7 +89,15 @@ export class ApiClient {
   }
 
   /* --- Catálogo e Serviços --- */
-  static async getServices(params?: { query?: string; category?: string; channel?: string; page?: number }): Promise<{
+  static async getServices(params?: {
+    query?: string;
+    category?: string;
+    channel?: string;
+    city?: string;
+    agencyId?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
     items: Service[];
     total: number;
     page: number;
@@ -100,12 +124,16 @@ export class ApiClient {
         filtered = filtered.filter((s) => s.category === params.category);
       }
 
+      if (params?.agencyId) {
+        filtered = filtered.filter((s) => s.agencyId === params.agencyId);
+      }
+
       if (params?.channel && params.channel !== "Todos") {
         filtered = filtered.filter((s) => s.channel === params.channel);
       }
 
       const total = filtered.length;
-      const pageSize = 10;
+      const pageSize = params?.pageSize || 10;
       const page = params?.page || 1;
       const start = (page - 1) * pageSize;
       const items = filtered.slice(start, start + pageSize);
@@ -119,8 +147,64 @@ export class ApiClient {
       };
     }
 
-    const queryParams = new URLSearchParams(params as Record<string, string>).toString();
-    return this.request(`/services?${queryParams}`);
+    const search = new URLSearchParams();
+    if (params?.query) search.set("query", params.query);
+    if (params?.category && params.category !== "Todos") search.set("category", params.category);
+    if (params?.channel && params.channel !== "Todos") search.set("channel", params.channel);
+    if (params?.city) search.set("city", params.city);
+    if (params?.agencyId) search.set("agencyId", params.agencyId);
+    if (params?.page) search.set("page", String(params.page));
+    if (params?.pageSize) search.set("pageSize", String(params.pageSize));
+    const qs = search.toString();
+    return this.request(`/services${qs ? `?${qs}` : ""}`);
+  }
+
+  static async createService(data: {
+    name: string;
+    category: string;
+    channel: string;
+    agencyId: string;
+    description: string;
+    whoCanUse?: string;
+    isFree?: boolean;
+    costAmount?: number | null;
+    averageDeadlineDays?: number;
+  }): Promise<Service> {
+    if (USE_MOCK) {
+      const created: Service = {
+        id: `svc-${Date.now()}`,
+        name: data.name,
+        category: (data.category as Service["category"]) || "Documentos",
+        channel: (data.channel as Service["channel"]) || "inPerson",
+        agencyId: data.agencyId,
+        agencyAcronym: "SOSP",
+        agencyName: "Governo de Alagoas",
+        isFree: data.isFree ?? true,
+        costAmount: data.costAmount ?? null,
+        averageDeadlineDays: data.averageDeadlineDays ?? 5,
+        summary: data.description.slice(0, 160),
+        description: data.description,
+        whoCanUse: data.whoCanUse || "Cidadãos residentes em Alagoas.",
+        updatedAt: new Date().toISOString(),
+        unitCount: 1,
+        documents: [],
+        steps: [],
+      };
+      MOCK_SERVICES.unshift(created);
+      return created;
+    }
+    return this.request("/services", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async deactivateService(id: string): Promise<Service> {
+    if (USE_MOCK) {
+      const found = MOCK_SERVICES.find((s) => s.id === id) || MOCK_SERVICES[0];
+      return found;
+    }
+    return this.request(`/services/${id}`, { method: "DELETE" });
   }
 
   static async getServiceById(id: string): Promise<Service | null> {
@@ -135,6 +219,42 @@ export class ApiClient {
   static async getAgencies(): Promise<Agency[]> {
     if (USE_MOCK) return MOCK_AGENCIES;
     return this.request("/agencies");
+  }
+
+  static async createAgency(data: {
+    name: string;
+    acronym: string;
+    sphere: Agency["sphere"];
+    description?: string;
+  }): Promise<Agency> {
+    if (USE_MOCK) {
+      const created: Agency = {
+        id: `agency-${Date.now()}`,
+        name: data.name,
+        acronym: data.acronym.toUpperCase(),
+        sphere: data.sphere,
+        description: data.description || "",
+        isActive: true,
+      };
+      MOCK_AGENCIES.unshift(created);
+      return created;
+    }
+    return this.request("/agencies", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async deactivateAgency(id: string): Promise<Agency> {
+    if (USE_MOCK) {
+      const idx = MOCK_AGENCIES.findIndex((a) => a.id === id);
+      if (idx !== -1) {
+        MOCK_AGENCIES[idx] = { ...MOCK_AGENCIES[idx], isActive: false };
+        return MOCK_AGENCIES[idx];
+      }
+      return { id, name: "", acronym: "", sphere: "state", isActive: false };
+    }
+    return this.request(`/agencies/${id}`, { method: "DELETE" });
   }
 
   static async updateAgency(id: string, data: Partial<Agency>): Promise<Agency> {
@@ -164,6 +284,58 @@ export class ApiClient {
       return MOCK_UNITS;
     }
     return this.request(`/units${agencyId ? `?agencyId=${agencyId}` : ""}`);
+  }
+
+  static async createUnit(data: {
+    agencyId: string;
+    name: string;
+    cep?: string;
+    street: string;
+    number?: string;
+    neighborhood?: string;
+    city: string;
+    state: string;
+    openingHours?: string;
+    dailyLimit: number;
+    isPcdAccessible: boolean;
+    hasPriorityService?: boolean;
+  }): Promise<Unit> {
+    if (USE_MOCK) {
+      const created: Unit = {
+        id: `unit-${Date.now()}`,
+        agencyId: data.agencyId,
+        name: data.name,
+        cep: data.cep || "57020-100",
+        street: data.street,
+        number: data.number || "S/N",
+        neighborhood: data.neighborhood || "Centro",
+        city: data.city,
+        state: data.state,
+        openingHours: data.openingHours || "08:00 às 17:00",
+        dailyLimit: data.dailyLimit,
+        isPcdAccessible: data.isPcdAccessible,
+        hasPriorityService: data.hasPriorityService ?? true,
+        isActive: true,
+      };
+      MOCK_UNITS.unshift(created);
+      return created;
+    }
+    return this.request("/units", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async deactivateUnit(id: string): Promise<Unit> {
+    if (USE_MOCK) {
+      const idx = MOCK_UNITS.findIndex((u) => u.id === id);
+      if (idx !== -1) {
+        MOCK_UNITS[idx] = { ...MOCK_UNITS[idx], isActive: false };
+        return MOCK_UNITS[idx];
+      }
+      return MOCK_UNITS[0];
+    }
+    return this.request(`/units/${id}`, { method: "DELETE" });
   }
 
   /* --- Agendamento e Slots (Slots de 30 min — RN-18) --- */
@@ -456,6 +628,184 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  /* --- Fila Operacional do Servidor, Anexos, Guia, Usuários Internos, Auditoria e Relatórios --- */
+  static async getOperationalAppointments(params?: { status?: string; date?: string }): Promise<Appointment[]> {
+    if (USE_MOCK) {
+      return [...MOCK_APPOINTMENTS];
+    }
+    const search = new URLSearchParams();
+    if (params?.status && params.status !== "all") search.set("status", params.status);
+    if (params?.date) search.set("date", params.date);
+    const qs = search.toString();
+    return this.request(`/appointments/queue${qs ? `?${qs}` : ""}`);
+  }
+
+  static async updateAppointmentStatus(
+    appointmentId: string,
+    status: "scheduled" | "confirmed" | "in_progress" | "completed" | "no_show" | "cancelled",
+    note?: string
+  ): Promise<Appointment> {
+    if (USE_MOCK) {
+      const target = MOCK_APPOINTMENTS.find((a) => a.id === appointmentId);
+      if (target) {
+        target.status = status === "in_progress" ? "confirmed" : status;
+        return { ...target };
+      }
+      throw { type: "about:blank", title: "Não encontrado", status: 404, detail: "Agendamento não encontrado." } as ProblemDetails;
+    }
+    return this.request(`/appointments/${appointmentId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, note: note || "" }),
+    });
+  }
+
+  static async uploadProtocolAttachment(
+    protocolNumber: string,
+    file: File
+  ): Promise<{ id: string; protocolNumber: string; fileName: string; fileSize: number; uploadedAt: string }> {
+    if (USE_MOCK) {
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        id: `doc-${Date.now()}`,
+        protocolNumber,
+        fileName: file.name,
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString(),
+      };
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request(`/protocols/${protocolNumber}/documents`, {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  static async getServiceGuidance(serviceId: string): Promise<{ checkedItems: string[]; totalRequired?: number }> {
+    if (USE_MOCK) {
+      return { checkedItems: [] };
+    }
+    return this.request(`/guidance/services/${serviceId}`);
+  }
+
+  static async saveServiceChecklist(serviceId: string, checkedItems: string[]): Promise<{ checkedItems: string[] }> {
+    if (USE_MOCK) {
+      return { checkedItems };
+    }
+    return this.request(`/guidance/services/${serviceId}`, {
+      method: "PUT",
+      body: JSON.stringify({ checkedItems }),
+    });
+  }
+
+  static async getInternalUsers(): Promise<InternalUserAccount[]> {
+    if (USE_MOCK) {
+      return [];
+    }
+    return this.request("/internal-users");
+  }
+
+  static async createInternalUser(data: {
+    fullName: string;
+    cpf: string;
+    email: string;
+    registrationNumber: string;
+    role: string;
+    agencyId?: string | null;
+    unitId?: string | null;
+    canManageCatalog: boolean;
+    temporaryPassword?: string;
+  }): Promise<InternalUserAccount> {
+    if (USE_MOCK) {
+      return {
+        id: `user-${Date.now()}`,
+        fullName: data.fullName,
+        email: data.email,
+        cpfMasked: "***.***.***-**",
+        registrationNumber: data.registrationNumber,
+        agencyId: data.agencyId || null,
+        unitId: data.unitId || null,
+        role: data.role,
+        canManageCatalog: data.canManageCatalog,
+        mustChangePassword: true,
+        isActive: true,
+      };
+    }
+    return this.request("/internal-users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async deactivateInternalUser(userId: string): Promise<InternalUserAccount> {
+    if (USE_MOCK) {
+      return {
+        id: userId,
+        fullName: "",
+        email: "",
+        cpfMasked: "***.***.***-**",
+        registrationNumber: "",
+        role: "server",
+        canManageCatalog: false,
+        isActive: false,
+      };
+    }
+    return this.request(`/internal-users/${userId}`, { method: "DELETE" });
+  }
+
+  static async getAuditEvents(): Promise<AuditLogEntry[]> {
+    if (USE_MOCK) {
+      return [];
+    }
+    return this.request("/audit");
+  }
+
+  static async getAppointmentsReport(params?: {
+    startDate?: string;
+    endDate?: string;
+    agencyId?: string;
+    unitId?: string;
+  }): Promise<AppointmentsReportSummary> {
+    if (USE_MOCK) {
+      return {
+        period: { start: params?.startDate || "2026-11-01", end: params?.endDate || "2026-11-30" },
+        scope: { agencyId: params?.agencyId || null, unitId: params?.unitId || null },
+        metrics: {
+          totalAppointments: MOCK_APPOINTMENTS.length,
+          scheduled: MOCK_APPOINTMENTS.filter((a) => a.status === "scheduled").length,
+          inProgress: MOCK_APPOINTMENTS.filter((a) => a.status === "confirmed").length,
+          completed: MOCK_APPOINTMENTS.filter((a) => a.status === "completed").length,
+          cancelled: MOCK_APPOINTMENTS.filter((a) => a.status === "cancelled").length,
+          noShow: MOCK_APPOINTMENTS.filter((a) => a.status === "no_show").length,
+          attendanceRate: 0,
+        },
+        byService: [],
+        recentQueue: MOCK_APPOINTMENTS,
+      };
+    }
+    const search = new URLSearchParams();
+    if (params?.startDate) search.set("startDate", params.startDate);
+    if (params?.endDate) search.set("endDate", params.endDate);
+    if (params?.agencyId) search.set("agencyId", params.agencyId);
+    if (params?.unitId) search.set("unitId", params.unitId);
+    const qs = search.toString();
+    return this.request(`/reports/appointments${qs ? `?${qs}` : ""}`);
+  }
+
+  static async createReportExport(
+    type: "csv" | "pdf",
+    filters?: Record<string, unknown>
+  ): Promise<{ exportId: string; status: string; downloadUrl: string }> {
+    if (USE_MOCK) {
+      return { exportId: `exp-${Date.now()}`, status: "done", downloadUrl: "" };
+    }
+    return this.request("/reports/exports", {
+      method: "POST",
+      body: JSON.stringify({ type, filters: filters || {} }),
+    });
+  }
+
   static logout(): void {
     if (typeof window !== "undefined") {
       clearAuthSessionStorage();
@@ -480,15 +830,26 @@ export class ApiClient {
 
 // Named exports for ease of consumption
 export const getServices = ApiClient.getServices.bind(ApiClient);
+export const createService = ApiClient.createService.bind(ApiClient);
+export const deactivateService = ApiClient.deactivateService.bind(ApiClient);
 export const getServiceById = ApiClient.getServiceById.bind(ApiClient);
 export const getAgencies = ApiClient.getAgencies.bind(ApiClient);
+export const createAgency = ApiClient.createAgency.bind(ApiClient);
 export const updateAgency = ApiClient.updateAgency.bind(ApiClient);
+export const deactivateAgency = ApiClient.deactivateAgency.bind(ApiClient);
 export const getUnits = ApiClient.getUnits.bind(ApiClient);
+export const createUnit = ApiClient.createUnit.bind(ApiClient);
+export const deactivateUnit = ApiClient.deactivateUnit.bind(ApiClient);
 export const getAppointmentSlots = ApiClient.getSlots.bind(ApiClient);
 export const createAppointment = ApiClient.createAppointment.bind(ApiClient);
 export const getCitizenAppointments = ApiClient.getCitizenAppointments.bind(ApiClient);
+export const getOperationalAppointments = ApiClient.getOperationalAppointments.bind(ApiClient);
+export const updateAppointmentStatus = ApiClient.updateAppointmentStatus.bind(ApiClient);
 export const getAppointmentByProtocol = ApiClient.getAppointmentByProtocol.bind(ApiClient);
 export const cancelAppointment = ApiClient.cancelAppointment.bind(ApiClient);
+export const uploadProtocolAttachment = ApiClient.uploadProtocolAttachment.bind(ApiClient);
+export const getServiceGuidance = ApiClient.getServiceGuidance.bind(ApiClient);
+export const saveServiceChecklist = ApiClient.saveServiceChecklist.bind(ApiClient);
 export const registerCitizen = ApiClient.registerCitizen.bind(ApiClient);
 export const loginCitizen = ApiClient.login.bind(ApiClient);
 export const logout = ApiClient.logout.bind(ApiClient);
@@ -497,5 +858,11 @@ export const recoverPassword = ApiClient.recoverPassword.bind(ApiClient);
 export const resetPassword = ApiClient.resetPassword.bind(ApiClient);
 export const changePassword = ApiClient.changePassword.bind(ApiClient);
 export const getCitizenMe = ApiClient.getCitizenMe.bind(ApiClient);
+export const getInternalUsers = ApiClient.getInternalUsers.bind(ApiClient);
+export const createInternalUser = ApiClient.createInternalUser.bind(ApiClient);
+export const deactivateInternalUser = ApiClient.deactivateInternalUser.bind(ApiClient);
+export const getAuditEvents = ApiClient.getAuditEvents.bind(ApiClient);
+export const getAppointmentsReport = ApiClient.getAppointmentsReport.bind(ApiClient);
+export const createReportExport = ApiClient.createReportExport.bind(ApiClient);
 export const getFaqs = ApiClient.getFaqs.bind(ApiClient);
 export const openQuestion = ApiClient.openQuestion.bind(ApiClient);

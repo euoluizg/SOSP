@@ -1,49 +1,105 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   FileText,
   Download,
-  Calendar,
-  Filter,
   BarChart3,
-  TrendingUp,
   Users,
   CheckCircle2,
   UserX,
   ArrowLeft,
   ChevronRight,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { getAppointmentsReport, createReportExport } from "@/services/apiClient";
+import type { AppointmentsReportSummary, ProblemDetails } from "@/types/api";
+
+function computeDateRange(period: string): { startDate: string; endDate: string } {
+  const now = new Date();
+  const end = now.toISOString().slice(0, 10);
+  const start = new Date(now);
+  if (period === "7days") {
+    start.setDate(now.getDate() - 7);
+  } else if (period === "30days") {
+    start.setDate(now.getDate() - 30);
+  } else if (period === "month") {
+    start.setDate(1);
+  } else {
+    start.setMonth(0, 1);
+  }
+  return { startDate: start.toISOString().slice(0, 10), endDate: end };
+}
 
 export default function ReportsPage() {
   const [period, setPeriod] = useState("30days");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<AppointmentsReportSummary | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
-  const handleExportCsv = () => {
+  const loadReport = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const range = computeDateRange(period);
+      const data = await getAppointmentsReport(range);
+      setReport(data);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setError(problem?.detail || "Não foi possível carregar os indicadores reais de atendimento.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [period]);
+
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
+  const handleExportCsv = async () => {
     setIsExporting(true);
-    setTimeout(() => {
-      setIsExporting(false);
-      // Simula download CSV
-      const csvContent =
-        "data:text/csv;charset=utf-8,Protocolo,Cidadao,Servico,Unidade,Data,Status\n" +
-        "20261105-1001,Maria Eduarda Silveira,Emitir CIN,Central Ja! Centro,2026-11-05,Concluido\n" +
-        "20261105-1014,Joao Pedro Cavalcante,Renovacao CNH,Central Ja! Centro,2026-11-05,Concluido\n" +
-        "20261105-1068,Lucas Henrique Ferreira,Emitir CIN,Central Ja! Centro,2026-11-05,Nao Compareceu\n";
-      const encodedUri = encodeURI(csvContent);
+    try {
+      const range = computeDateRange(period);
+      await createReportExport("csv", range).catch(() => null);
+      const rows = report?.recentQueue || [];
+      const header = "Protocolo,Cidadao,Servico,Unidade,Data,Horario,Status\n";
+      const body = rows
+        .map(
+          (r) =>
+            `"${r.protocolNumber}","${r.citizenName}","${r.serviceName}","${r.unitName}","${r.scheduledDate}","${r.scheduledTime}","${r.status}"`
+        )
+        .join("\n");
+      const blob = new Blob(["\uFEFF" + header + body], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
+      link.setAttribute("href", url);
       link.setAttribute("download", `relatorio_atendimentos_sosp_${period}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    }, 600);
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
+    const range = computeDateRange(period);
+    await createReportExport("pdf", range).catch(() => null);
     window.print();
   };
+
+  const total = report?.metrics.totalAppointments ?? 0;
+  const completed = report?.metrics.completed ?? 0;
+  const noShow = report?.metrics.noShow ?? 0;
+  const scheduled = report?.metrics.scheduled ?? 0;
+  const attendanceRate = report?.metrics.attendanceRate ?? 0;
+  const noShowRate = total > 0 ? Number(((noShow / total) * 100).toFixed(1)) : 0;
+  const serviceRows = report?.byService || [];
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -64,7 +120,7 @@ export default function ReportsPage() {
               Relatório Geral de Atendimentos
             </h1>
             <p className="text-sm text-gray-600 mt-1">
-              Métricas agregadas de desempenho, comparecimento e capacidade instalada da unidade.
+              Métricas reais agregadas de desempenho, comparecimento e demanda da unidade.
             </p>
           </div>
 
@@ -76,8 +132,8 @@ export default function ReportsPage() {
             >
               <option value="7days">Últimos 7 dias</option>
               <option value="30days">Últimos 30 dias</option>
-              <option value="month">Mês Atual (Novembro/2026)</option>
-              <option value="year">Ano de 2026</option>
+              <option value="month">Mês Atual</option>
+              <option value="year">Ano Atual</option>
             </select>
 
             <Button
@@ -97,113 +153,135 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Indicadores Principais */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
-              <span>Total de Agendamentos</span>
-              <Users className="w-4 h-4 text-[#1351B4]" />
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>{error}</span>
             </div>
-            <div className="text-3xl font-black text-gray-900 mt-2">1.248</div>
-            <span className="text-xs text-green-600 mt-1 block">
-              +12% em relação ao período anterior
-            </span>
+            <Button variant="secondary" size="sm" onClick={loadReport}>
+              Tentar novamente
+            </Button>
           </div>
+        )}
 
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
-              <span>Taxa de Comparecimento</span>
-              <CheckCircle2 className="w-4 h-4 text-green-600" />
-            </div>
-            <div className="text-3xl font-black text-green-600 mt-2">91.4%</div>
-            <span className="text-xs text-gray-500 mt-1 block">1.141 cidadãos atendidos</span>
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" aria-busy="true">
+            <Skeleton className="h-32 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
           </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
-              <span>Taxa de Abstenção</span>
-              <UserX className="w-4 h-4 text-red-600" />
-            </div>
-            <div className="text-3xl font-black text-red-600 mt-2">8.6%</div>
-            <span className="text-xs text-red-600/80 mt-1 block">107 ausências (RN-23)</span>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
-              <span>Tempo Médio</span>
-              <BarChart3 className="w-4 h-4 text-amber-600" />
-            </div>
-            <div className="text-3xl font-black text-gray-900 mt-2">18 min</div>
-            <span className="text-xs text-gray-500 mt-1 block">Slot máximo de 30 minutos</span>
-          </div>
-        </div>
-
-        {/* Gráfico / Distribuição por Serviço */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Card 1: Distribuição de Demanda por Serviço */}
-          <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900 mb-6">
-              Serviços Mais Procurados
-            </h2>
-            <div className="space-y-4">
-              {[
-                { name: "Emitir Carteira de Identidade (CIN)", count: 620, percent: 50 },
-                { name: "Renovação de CNH (DETRAN)", count: 310, percent: 25 },
-                { name: "Cadastro Único (CadÚnico)", count: 186, percent: 15 },
-                { name: "Certidão Negativa de Débitos (SEFAZ)", count: 132, percent: 10 },
-              ].map((svc, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
-                    <span>{svc.name}</span>
-                    <span>
-                      {svc.count} ({svc.percent}%)
-                    </span>
-                  </div>
-                  <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#1351B4] rounded-full"
-                      style={{ width: `${svc.percent}%` }}
-                    />
-                  </div>
+        ) : (
+          <>
+            {/* Indicadores Principais */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
+                  <span>Total de Agendamentos</span>
+                  <Users className="w-4 h-4 text-[#1351B4]" />
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="text-3xl font-black text-gray-900 mt-2">{total}</div>
+                <span className="text-xs text-gray-500 mt-1 block">
+                  {scheduled} aguardando atendimento
+                </span>
+              </div>
 
-          {/* Card 2: Horários de Pico no Expediente */}
-          <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900 mb-6">
-              Distribuição por Faixa de Horário
-            </h2>
-            <div className="space-y-4">
-              {[
-                { time: "08:00 - 10:00 (Manhã cedo)", load: 95 },
-                { time: "10:00 - 12:00 (Pico da manhã)", load: 100 },
-                { time: "13:30 - 15:30 (Início da tarde)", load: 78 },
-                { time: "15:30 - 17:00 (Final do expediente)", load: 60 },
-              ].map((slot, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
-                    <span>{slot.time}</span>
-                    <span>{slot.load}% ocupação</span>
-                  </div>
-                  <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${
-                        slot.load >= 90
-                          ? "bg-red-500"
-                          : slot.load >= 70
-                          ? "bg-amber-500"
-                          : "bg-green-500"
-                      }`}
-                      style={{ width: `${slot.load}%` }}
-                    />
-                  </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
+                  <span>Taxa de Comparecimento</span>
+                  <CheckCircle2 className="w-4 h-4 text-green-600" />
                 </div>
-              ))}
+                <div className="text-3xl font-black text-green-600 mt-2">{attendanceRate}%</div>
+                <span className="text-xs text-gray-500 mt-1 block">{completed} cidadãos concluídos</span>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
+                  <span>Taxa de Abstenção</span>
+                  <UserX className="w-4 h-4 text-red-600" />
+                </div>
+                <div className="text-3xl font-black text-red-600 mt-2">{noShowRate}%</div>
+                <span className="text-xs text-red-600/80 mt-1 block">{noShow} ausências (RN-23)</span>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-500 uppercase">
+                  <span>Duração do Slot</span>
+                  <BarChart3 className="w-4 h-4 text-amber-600" />
+                </div>
+                <div className="text-3xl font-black text-gray-900 mt-2">30 min</div>
+                <span className="text-xs text-gray-500 mt-1 block">Padrão oficial SOSP (RN-18)</span>
+              </div>
             </div>
-          </div>
-        </div>
+
+            {/* Distribuição por Serviço + Últimos Protocolos */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+              <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200">
+                <h2 className="text-lg font-bold text-gray-900 mb-6">
+                  Serviços Mais Procurados no Período
+                </h2>
+                {serviceRows.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    Nenhum agendamento registrado neste período para o seu escopo.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {serviceRows.map((svc, idx) => {
+                      const pct = total > 0 ? Math.round((svc.total / total) * 100) : 0;
+                      return (
+                        <div key={idx}>
+                          <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
+                            <span>{svc.serviceName}</span>
+                            <span>
+                              {svc.total} ({pct}%)
+                            </span>
+                          </div>
+                          <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#1351B4] rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200">
+                <h2 className="text-lg font-bold text-gray-900 mb-6">
+                  Últimos Protocolos Registrados
+                </h2>
+                {!report?.recentQueue || report.recentQueue.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    Nenhum protocolo encontrado no período selecionado.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {report.recentQueue.slice(0, 8).map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between text-xs p-3 rounded-xl bg-gray-50 border border-gray-100"
+                      >
+                        <div>
+                          <span className="font-mono font-bold text-[#1351B4]">{item.protocolNumber}</span>
+                          <p className="font-semibold text-gray-900">{item.citizenName}</p>
+                          <p className="text-gray-500">{item.serviceName}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="block font-semibold text-gray-700">{item.scheduledDate}</span>
+                          <span className="text-gray-500">{item.scheduledTime} · {item.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Voltar */}
         <div className="print:hidden">

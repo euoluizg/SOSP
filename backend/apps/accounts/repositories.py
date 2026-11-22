@@ -3,6 +3,7 @@ import time
 import datetime
 import secrets
 import sys
+import uuid
 from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
@@ -417,6 +418,79 @@ class CitizenInMemoryRepository(AbstractRepository):
                 self.revoke_all_sessions(str(user_id))
                 return True
         return False
+
+    def list_internal_users(self) -> List[Dict[str, Any]]:
+        results = []
+        for u in self._citizens.values():
+            if u.get("role") in ("server", "servant", "servidor", "gestor", "manager", "admin", "superadmin", "administrator"):
+                cpf = str(u.get("cpf", ""))
+                results.append({
+                    "id": str(u["id"]),
+                    "fullName": u.get("fullName", ""),
+                    "email": u.get("email", ""),
+                    "cpfMasked": f"***.{cpf[3:6]}.{cpf[6:9]}-**" if len(cpf) == 11 else "***.***.***-**",
+                    "registrationNumber": u.get("registrationNumber") or "",
+                    "agencyId": u.get("agencyId"),
+                    "unitId": u.get("unitId"),
+                    "role": u.get("role", "server"),
+                    "canManageCatalog": bool(u.get("canManageCatalog", False)),
+                    "mustChangePassword": bool(u.get("mustChangePassword", False)),
+                    "isActive": bool(u.get("isActive", True)),
+                })
+        return results
+
+    def create_internal_user(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        uid = str(uuid.uuid4())
+        cpf = "".join(filter(str.isdigit, data["cpf"]))
+        rec = {
+            "id": uid,
+            "fullName": data["fullName"].strip(),
+            "cpf": cpf,
+            "email": data["email"].strip().lower(),
+            "registrationNumber": data["registrationNumber"].strip().upper(),
+            "agencyId": data.get("agencyId") or None,
+            "unitId": data.get("unitId") or None,
+            "role": data["role"],
+            "canManageCatalog": bool(data.get("canManageCatalog", False)),
+            "passwordHash": data["passwordHash"],
+            "mustChangePassword": True,
+            "isActive": True,
+        }
+        self._citizens[uid] = rec
+        return {
+            "id": uid,
+            "fullName": rec["fullName"],
+            "email": rec["email"],
+            "cpfMasked": f"***.{cpf[3:6]}.{cpf[6:9]}-**" if len(cpf) == 11 else "***.***.***-**",
+            "registrationNumber": rec["registrationNumber"],
+            "agencyId": rec["agencyId"],
+            "unitId": rec["unitId"],
+            "role": rec["role"],
+            "canManageCatalog": rec["canManageCatalog"],
+            "mustChangePassword": True,
+            "isActive": True,
+        }
+
+    def deactivate_internal_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        u = self._citizens.get(user_id)
+        if not u:
+            return None
+        u["isActive"] = False
+        self.revoke_all_sessions(str(user_id))
+        cpf = str(u.get("cpf", ""))
+        return {
+            "id": str(u["id"]),
+            "fullName": u.get("fullName", ""),
+            "email": u.get("email", ""),
+            "cpfMasked": f"***.{cpf[3:6]}.{cpf[6:9]}-**" if len(cpf) == 11 else "***.***.***-**",
+            "registrationNumber": u.get("registrationNumber") or "",
+            "agencyId": u.get("agencyId"),
+            "unitId": u.get("unitId"),
+            "role": u.get("role", "server"),
+            "canManageCatalog": bool(u.get("canManageCatalog", False)),
+            "mustChangePassword": bool(u.get("mustChangePassword", False)),
+            "isActive": False,
+        }
 
 class CitizenDjangoORMRepository(AbstractRepository):
     """Implementação real de persistência PostgreSQL via Django ORM (ADR-001 / Etapa 3)."""
@@ -1132,6 +1206,91 @@ class CitizenDjangoORMRepository(AbstractRepository):
         role_for_context = role or "superadmin"
         with db_security_context(user=SospUser(user_id=subject_id, role=role_for_context)):
             return Session.objects.filter(subject_id=subject_id, revoked_at__isnull=True).update(revoked_at=timezone.now())
+
+    @staticmethod
+    def _internal_to_dict(u) -> Dict[str, Any]:
+        cpf = u.cpf or ""
+        return {
+            "id": str(u.id),
+            "fullName": u.full_name,
+            "email": u.email,
+            "cpfMasked": f"***.{cpf[3:6]}.{cpf[6:9]}-**" if len(cpf) == 11 else "***.***.***-**",
+            "registrationNumber": u.registration_number,
+            "agencyId": str(u.agency_id) if u.agency_id else None,
+            "unitId": str(u.unit_id) if u.unit_id else None,
+            "role": u.role,
+            "canManageCatalog": bool(u.can_manage_catalog),
+            "mustChangePassword": bool(u.must_change_password),
+            "isActive": bool(u.is_active),
+            "createdAt": u.created_at.isoformat() if u.created_at else "",
+        }
+
+    def list_internal_users(self) -> List[Dict[str, Any]]:
+        from .models import InternalUser
+        qs = InternalUser.objects.all().order_by("-is_active", "full_name")
+        return [self._internal_to_dict(u) for u in qs]
+
+    def create_internal_user(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        from .models import InternalUser
+        from django.db import IntegrityError
+        from common.exceptions import ProblemDetailsException
+
+        clean_cpf = "".join(filter(str.isdigit, data["cpf"]))
+        agency_uuid = None
+        if data.get("agencyId"):
+            try:
+                agency_uuid = uuid.UUID(str(data["agencyId"]))
+            except Exception:
+                agency_uuid = None
+        unit_uuid = None
+        if data.get("unitId"):
+            try:
+                unit_uuid = uuid.UUID(str(data["unitId"]))
+            except Exception:
+                unit_uuid = None
+
+        try:
+            u = InternalUser.objects.create(
+                cpf=clean_cpf,
+                full_name=data["fullName"].strip(),
+                email=data["email"].strip().lower(),
+                registration_number=data["registrationNumber"].strip().upper(),
+                agency_id=agency_uuid,
+                unit_id=unit_uuid,
+                role=data["role"],
+                can_manage_catalog=bool(data.get("canManageCatalog", False)),
+                password_hash=data["passwordHash"],
+                must_change_password=True,
+                is_active=True,
+            )
+        except IntegrityError:
+            raise ProblemDetailsException(
+                detail="Já existe um usuário interno ativo com este CPF, e-mail ou matrícula.",
+                title="Usuário duplicado",
+                status_code=409,
+            )
+        return self._internal_to_dict(u)
+
+    def deactivate_internal_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        from .models import InternalUser
+        from django.utils import timezone
+        from django.core.exceptions import ValidationError
+
+        try:
+            u = InternalUser.objects.filter(id=user_id).first()
+        except (ValidationError, ValueError):
+            return None
+        if not u:
+            return None
+        u.is_active = False
+        if not u.deleted_at:
+            u.deleted_at = timezone.now()
+        u.save(update_fields=["is_active", "deleted_at", "updated_at"])
+        try:
+            self.revoke_all_sessions(str(u.id), role="superadmin")
+        except Exception:
+            pass
+        return self._internal_to_dict(u)
 
     def _to_dict(self, c) -> Dict[str, Any]:
         return {

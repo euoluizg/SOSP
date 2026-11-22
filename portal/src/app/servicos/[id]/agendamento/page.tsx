@@ -18,8 +18,16 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { getServiceById, getUnits, getAppointmentSlots, createAppointment } from "@/services/apiClient";
-import type { Service, Unit, AppointmentSlot, Appointment } from "@/types/api";
+import {
+  getServiceById,
+  getUnits,
+  getAppointmentSlots,
+  createAppointment,
+  getCitizenMe,
+  isAuthenticated,
+} from "@/services/apiClient";
+import { getStoredUserSession } from "@/utils/session";
+import type { Service, Unit, AppointmentSlot, Appointment, ProblemDetails } from "@/types/api";
 
 export default function AppointmentSchedulingPage() {
   const params = useParams();
@@ -39,19 +47,58 @@ export default function AppointmentSchedulingPage() {
   const [availableSlots, setAvailableSlots] = useState<AppointmentSlot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<AppointmentSlot | null>(null);
   const [isSearchingSlots, setIsSearchingSlots] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
 
-  // Dados do cidadão mockado para agendamento
-  const citizenInfo = {
-    name: "Cidadão de Testes",
-    cpf: "123.456.789-00",
-    email: "cidadao@exemplo.com",
-    phone: "(82) 98888-7777",
-  };
+  // Dados reais do cidadão autenticado na sessão
+  const [citizenInfo, setCitizenInfo] = useState({
+    name: "Visitante (faça login para agendar)",
+    cpf: "Não autenticado",
+    email: "-",
+    phone: "-",
+  });
 
   // Resultado do agendamento confirmado
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hasAuth = isAuthenticated();
+    setLoggedIn(hasAuth);
+    const session = getStoredUserSession();
+    if (session) {
+      const digits = (session.cpf || "").replace(/\D/g, "");
+      const maskedCpf =
+        digits.length === 11
+          ? `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`
+          : session.cpf || "-";
+      setCitizenInfo({
+        name: session.fullName || "Cidadão Autenticado",
+        cpf: maskedCpf,
+        email: session.email || "-",
+        phone: "-",
+      });
+    }
+    if (hasAuth && (!session || session.role === "citizen" || session.role === "cidadao")) {
+      getCitizenMe()
+        .then((profile) => {
+          const digits = (profile.cpf || "").replace(/\D/g, "");
+          const formattedCpf =
+            digits.length === 11
+              ? `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`
+              : profile.cpf;
+          setCitizenInfo({
+            name: profile.fullName,
+            cpf: formattedCpf,
+            email: profile.email,
+            phone: profile.phone || "-",
+          });
+        })
+        .catch(() => {
+          // Mantém dados da sessão local
+        });
+    }
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -148,6 +195,11 @@ export default function AppointmentSchedulingPage() {
   const handleConfirmAppointment = async () => {
     if (!selectedSlot || !service) return;
 
+    if (!loggedIn && !isAuthenticated()) {
+      router.push(`/login?next=${encodeURIComponent(`/servicos/${service.id}/agendamento`)}`);
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -162,10 +214,11 @@ export default function AppointmentSchedulingPage() {
       setConfirmedAppointment(appointment);
       setStep(3); // Tela de Comprovante Oficial (10 / W10)
       window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
       console.error("Erro ao confirmar agendamento:", err);
       setError(
-        err?.message ||
+        problem?.detail ||
           "Não foi possível confirmar seu agendamento. Verifique se você já possui um agendamento ativo para este serviço (RN-21)."
       );
     } finally {

@@ -31,28 +31,46 @@ function ServicesContent() {
   const [currentPage, setCurrentPage] = useState(initialPage);
 
   const [services, setServices] = useState<Service[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Carrega serviços e órgãos
+  // Carrega órgãos uma vez
   useEffect(() => {
-    async function loadData() {
+    getAgencies()
+      .then((res) => setAgencies(res))
+      .catch((err) => console.error("Erro ao carregar órgãos:", err));
+  }, []);
+
+  // Carrega serviços via API aplicando busca semântica/sinônimos + 4 filtros combináveis (RN-03, RN-04, RN-05)
+  useEffect(() => {
+    async function loadServices() {
       setIsLoading(true);
+      setLoadError(null);
       try {
-        const [servicesRes, agenciesRes] = await Promise.all([
-          getServices(),
-          getAgencies(),
-        ]);
-        setServices(servicesRes.items);
-        setAgencies(agenciesRes);
+        const res = await getServices({
+          query: query.trim() || undefined,
+          category: category || undefined,
+          agencyId: agencyId || undefined,
+          channel: channel || undefined,
+          city: municipality || undefined,
+          page: currentPage,
+          pageSize: 10,
+        });
+        setServices(res.items || []);
+        setTotalItems(res.total ?? (res.items?.length || 0));
+        setTotalPages(Math.max(1, res.totalPages || 1));
       } catch (err) {
         console.error("Erro ao carregar serviços:", err);
+        setLoadError("Não foi possível consultar o catálogo de serviços no momento.");
       } finally {
         setIsLoading(false);
       }
     }
-    loadData();
-  }, []);
+    loadServices();
+  }, [query, category, agencyId, channel, municipality, currentPage]);
 
   // Atualiza a URL quando os filtros mudam (RN-03)
   const updateUrlFilters = (newParams: Record<string, string | number>) => {
@@ -67,45 +85,8 @@ function ServicesContent() {
     router.push(`/servicos?${params.toString()}`);
   };
 
-  // Filtragem combinável por interseção (AND) conforme RN-04
-  const filteredServices = useMemo(() => {
-    return services.filter((svc) => {
-      // 1. Busca por termo
-      if (query.trim()) {
-        const q = query.toLowerCase();
-        const matchesName = svc.name.toLowerCase().includes(q);
-        const matchesSummary = svc.summary.toLowerCase().includes(q);
-        const matchesAgency =
-          svc.agencyName.toLowerCase().includes(q) ||
-          svc.agencyAcronym.toLowerCase().includes(q);
-        if (!matchesName && !matchesSummary && !matchesAgency) return false;
-      }
-      // 2. Filtro de Categoria
-      if (category && svc.category !== category) return false;
-      // 3. Filtro de Órgão
-      if (agencyId && svc.agencyId !== agencyId) return false;
-      // 4. Filtro de Canal (online, inPerson, hybrid)
-      if (channel && svc.channel !== channel) return false;
-      // 5. Filtro de Município (RN-04 / D3)
-      if (municipality) {
-        const isCapitalOrRegional =
-          municipality.toLowerCase() === "maceió" || municipality.toLowerCase() === "arapiraca";
-        if (svc.channel === "inPerson" && !isCapitalOrRegional) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [services, query, category, agencyId, channel, municipality]);
-
-  // Paginação de 5 itens por página para visualização otimizada
-  const pageSize = 5;
-  const totalPages = Math.ceil(filteredServices.length / pageSize) || 1;
-  const paginatedServices = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredServices.slice(start, start + pageSize);
-  }, [filteredServices, currentPage]);
+  const filteredServices = useMemo(() => services, [services]);
+  const paginatedServices = services;
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -254,8 +235,8 @@ function ServicesContent() {
             {/* Ações e Resumo de Filtros */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100">
               <span className="text-xs text-gray-500 font-medium">
-                {filteredServices.length}{" "}
-                {filteredServices.length === 1
+                {totalItems}{" "}
+                {totalItems === 1
                   ? "serviço encontrado"
                   : "serviços encontrados"}
               </span>
@@ -273,6 +254,12 @@ function ServicesContent() {
             </div>
           </form>
         </div>
+
+        {loadError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
 
         {/* Lista de Resultados / Estados de Carregamento / Erro Vazio (RN-13) */}
         {isLoading ? (

@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { getAppointmentByProtocol } from "@/services/apiClient";
-import type { Appointment } from "@/types/api";
+import { getAppointmentByProtocol, uploadProtocolAttachment } from "@/services/apiClient";
+import type { Appointment, ProblemDetails } from "@/types/api";
 
 export default function AttachDocumentsPage() {
   const params = useParams();
@@ -79,7 +79,7 @@ export default function AttachDocumentsPage() {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedFiles.length === 0) {
       setErrorMessage("Selecione ao menos um arquivo para anexar.");
@@ -89,11 +89,17 @@ export default function AttachDocumentsPage() {
     setIsUploading(true);
     setErrorMessage(null);
 
-    // Simulação do upload com antivírus (ClamAV)
-    setTimeout(() => {
-      setIsUploading(false);
+    try {
+      for (const file of selectedFiles) {
+        await uploadProtocolAttachment(protocol, file);
+      }
       setUploadSuccess(true);
-    }, 1200);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      setErrorMessage(problem?.detail || "Falha ao enviar o anexo para o protocolo. Tente novamente.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   if (isLoading) {

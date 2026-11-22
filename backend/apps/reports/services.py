@@ -21,11 +21,28 @@ class ReportsService:
         elif agency_id:
             appts = [a for a in appts if str(a.get("agencyId") or "") == str(agency_id)]
 
+        # Filtragem por período (quando informado)
+        if start_date:
+            appts = [a for a in appts if str(a.get("scheduledDate") or "") >= start_date]
+        if end_date:
+            appts = [a for a in appts if str(a.get("scheduledDate") or "") <= end_date]
+
         total = len(appts)
         scheduled = sum(1 for a in appts if a.get("status") == "scheduled")
+        in_progress = sum(1 for a in appts if a.get("status") in ("confirmed", "in_progress"))
         completed = sum(1 for a in appts if a.get("status") == "completed")
         cancelled = sum(1 for a in appts if a.get("status") == "cancelled")
-        no_show = sum(1 for a in appts if a.get("status") == "no_show")
+        no_show = sum(1 for a in appts if a.get("status") in ("no_show", "noShow"))
+
+        by_service: Dict[str, Dict[str, Any]] = {}
+        for a in appts:
+            svc_name = a.get("serviceName") or "Serviço Público"
+            entry = by_service.setdefault(svc_name, {"serviceName": svc_name, "total": 0, "completed": 0, "noShow": 0})
+            entry["total"] += 1
+            if a.get("status") == "completed":
+                entry["completed"] += 1
+            elif a.get("status") in ("no_show", "noShow"):
+                entry["noShow"] += 1
 
         return {
             "period": {"start": start_date or "2026-11-01", "end": end_date or "2026-11-30"},
@@ -36,12 +53,14 @@ class ReportsService:
             "metrics": {
                 "totalAppointments": total,
                 "scheduled": scheduled,
+                "inProgress": in_progress,
                 "completed": completed,
                 "cancelled": cancelled,
                 "noShow": no_show,
                 "attendanceRate": round((completed / total) * 100, 1) if total > 0 else 0,
             },
-            "recentQueue": appts[:10],
+            "byService": sorted(by_service.values(), key=lambda x: x["total"], reverse=True),
+            "recentQueue": appts[:25],
         }
 
     @staticmethod

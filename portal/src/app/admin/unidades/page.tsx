@@ -21,8 +21,8 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
 import { CriticalConfirmationModal } from "@/components/ui/CriticalConfirmationModal";
-import { getUnits, getAgencies } from "@/services/apiClient";
-import type { Unit, Agency } from "@/types/api";
+import { getUnits, getAgencies, createUnit, deactivateUnit } from "@/services/apiClient";
+import type { Unit, Agency, ProblemDetails } from "@/types/api";
 
 export default function AdminUnitsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -69,39 +69,48 @@ export default function AdminUnitsPage() {
     load();
   }, []);
 
-  const handleCreateUnit = (e: React.FormEvent) => {
+  const handleCreateUnit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUnit.name || !newUnit.street) return;
+    if (!newUnit.name || !newUnit.street || !newUnit.agencyId) return;
 
-    const created: Unit = {
-      id: `unit-${Date.now()}`,
-      agencyId: newUnit.agencyId,
-      name: newUnit.name,
-      cep: newUnit.cep || "57000-000",
-      street: newUnit.street,
-      number: newUnit.number || "S/N",
-      neighborhood: newUnit.neighborhood || "Centro",
-      city: newUnit.city,
-      state: newUnit.state,
-      openingHours: newUnit.openingHours,
-      dailyLimit: Number(newUnit.dailyLimit),
-      isPcdAccessible: newUnit.isPcdAccessible,
-      hasPriorityService: true,
-      isActive: true,
-    };
-
-    setUnits((prev) => [created, ...prev]);
-    setIsCreateModalOpen(false);
+    try {
+      const created = await createUnit({
+        agencyId: newUnit.agencyId,
+        name: newUnit.name.trim(),
+        cep: newUnit.cep || "57020-100",
+        street: newUnit.street.trim(),
+        number: newUnit.number || "S/N",
+        neighborhood: newUnit.neighborhood || "Centro",
+        city: newUnit.city,
+        state: newUnit.state,
+        openingHours: newUnit.openingHours,
+        dailyLimit: Number(newUnit.dailyLimit),
+        isPcdAccessible: newUnit.isPcdAccessible,
+        hasPriorityService: true,
+      });
+      setUnits((prev) => [created, ...prev]);
+      setIsCreateModalOpen(false);
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      console.error("Erro ao criar unidade:", problem?.detail || err);
+    }
   };
 
-  const handleConfirmDeactivate = () => {
+  const handleConfirmDeactivate = async () => {
     if (!deactivatingUnit) return;
-    setUnits((prev) =>
-      prev.map((u) =>
-        u.id === deactivatingUnit.id ? { ...u, isActive: false } : u
-      )
-    );
-    setDeactivatingUnit(null);
+    try {
+      await deactivateUnit(deactivatingUnit.id);
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === deactivatingUnit.id ? { ...u, isActive: false } : u
+        )
+      );
+    } catch (err: unknown) {
+      const problem = err as ProblemDetails;
+      console.error("Erro ao desativar unidade:", problem?.detail || err);
+    } finally {
+      setDeactivatingUnit(null);
+    }
   };
 
   const filteredUnits = units.filter((u) => {

@@ -1,4 +1,59 @@
+import uuid
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
+
+CATEGORY_SLUG_TO_LABEL: Dict[str, str] = {
+    "documents": "Documentos",
+    "health": "Saúde",
+    "education": "Educação",
+    "transport": "Transporte",
+    "transit": "Transporte",
+    "socialAssistance": "Assistência Social",
+    "taxes": "Tributos",
+    "work": "Trabalho",
+    "housing": "Habitação",
+    "environment": "Meio Ambiente",
+    "business": "Empresas",
+    "general": "Geral",
+}
+
+CATEGORY_LABEL_TO_SLUG: Dict[str, str] = {
+    "documentos": "documents",
+    "documentos pessoais": "documents",
+    "saúde": "health",
+    "saude": "health",
+    "educação": "education",
+    "educacao": "education",
+    "transporte": "transport",
+    "transporte e mobilidade": "transport",
+    "trânsito": "transit",
+    "transito": "transit",
+    "trânsito e veículos": "transit",
+    "assistência social": "socialAssistance",
+    "assistencia social": "socialAssistance",
+    "tributos": "taxes",
+    "tributos e impostos": "taxes",
+    "trabalho": "work",
+    "habitação": "housing",
+    "habitacao": "housing",
+    "meio ambiente": "environment",
+    "empresas": "business",
+    "geral": "general",
+    "cidadania e direitos": "general",
+}
+
+
+def normalize_category_slug(raw_category: str) -> str:
+    val = (raw_category or "general").strip()
+    if val in CATEGORY_SLUG_TO_LABEL:
+        return val
+    return CATEGORY_LABEL_TO_SLUG.get(val.lower(), "general")
+
+
+def category_slug_to_label(raw_category: str) -> str:
+    val = (raw_category or "general").strip()
+    return CATEGORY_SLUG_TO_LABEL.get(val, val)
+
 
 class CatalogInMemoryRepository:
     def __init__(self):
@@ -7,6 +62,7 @@ class CatalogInMemoryRepository:
                 "id": "orgao-ssp",
                 "name": "Secretaria de Estado da Segurança Pública",
                 "acronym": "SSP",
+                "sphere": "state",
                 "description": "Responsável pela segurança pública, identificação civil e perícia oficial do Estado de Alagoas.",
                 "website": "https://seguranca.al.gov.br",
                 "phone": "(82) 3315-2822",
@@ -17,6 +73,7 @@ class CatalogInMemoryRepository:
                 "id": "orgao-detran",
                 "name": "Departamento Estadual de Trânsito",
                 "acronym": "DETRAN-AL",
+                "sphere": "state",
                 "description": "Responsável pela habilitação de condutores, registro de veículos e fiscalização do trânsito.",
                 "website": "https://www.detran.al.gov.br",
                 "phone": "(82) 3315-1533",
@@ -27,6 +84,7 @@ class CatalogInMemoryRepository:
                 "id": "orgao-sefaz",
                 "name": "Secretaria de Estado da Fazenda",
                 "acronym": "SEFAZ-AL",
+                "sphere": "state",
                 "description": "Gestão tributária, arrecadação e administração financeira do Estado.",
                 "website": "https://www.sefaz.al.gov.br",
                 "phone": "(82) 3315-7000",
@@ -37,6 +95,7 @@ class CatalogInMemoryRepository:
                 "id": "orgao-seduc",
                 "name": "Secretaria de Estado da Educação",
                 "acronym": "SEDUC",
+                "sphere": "state",
                 "description": "Coordenação das políticas educacionais e rede escolar estadual.",
                 "website": "https://www.educacao.al.gov.br",
                 "phone": "(82) 3315-1200",
@@ -47,6 +106,7 @@ class CatalogInMemoryRepository:
                 "id": "orgao-sesau",
                 "name": "Secretaria de Estado da Saúde",
                 "acronym": "SESAU",
+                "sphere": "state",
                 "description": "Gestão do Sistema Único de Saúde (SUS) no âmbito estadual.",
                 "website": "https://saude.al.gov.br",
                 "phone": "(82) 3315-1100",
@@ -306,6 +366,18 @@ class CatalogInMemoryRepository:
                 return dict(a)
         return None
 
+    def create_agency(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        agency = {
+            "id": str(uuid.uuid4()),
+            "name": data["name"].strip(),
+            "acronym": data["acronym"].strip().upper(),
+            "sphere": data.get("sphere", "state"),
+            "description": (data.get("description") or "").strip(),
+            "isActive": True,
+        }
+        self._agencies.insert(0, agency)
+        return dict(agency)
+
     def update_agency(self, agency_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for a in self._agencies:
             if a["id"] == agency_id:
@@ -322,6 +394,9 @@ class CatalogInMemoryRepository:
                 return dict(a)
         return None
 
+    def deactivate_agency(self, agency_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_agency(agency_id, {"isActive": False})
+
     def get_units(self, agency_id: Optional[str] = None) -> List[Dict[str, Any]]:
         units = [u for u in self._units if u.get("isActive", True)]
         if agency_id:
@@ -331,8 +406,48 @@ class CatalogInMemoryRepository:
     def get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         for u in self._units:
             if u["id"] == unit_id:
-                return u
+                return dict(u)
         return None
+
+    def create_unit(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        unit = {
+            "id": str(uuid.uuid4()),
+            "agencyId": data["agencyId"],
+            "name": data["name"].strip(),
+            "cep": data.get("zipCode", "57020100"),
+            "zipCode": data.get("zipCode", "57020100"),
+            "street": data["street"].strip(),
+            "number": data.get("number", "S/N").strip(),
+            "neighborhood": data.get("neighborhood", "Centro").strip(),
+            "city": data.get("city", "Maceió").strip(),
+            "state": data.get("state", "AL").strip().upper(),
+            "phone": data.get("phone", ""),
+            "email": data.get("email", ""),
+            "openingHours": data.get("openingHours", "08:00 às 17:00"),
+            "dailyLimit": int(data.get("dailyLimit", 60)),
+            "dailyCapacity": int(data.get("dailyLimit", 60)),
+            "latitude": data.get("latitude"),
+            "longitude": data.get("longitude"),
+            "isPcdAccessible": bool(data.get("isPcdAccessible", True)),
+            "hasPriorityService": bool(data.get("hasPriorityService", True)),
+            "isActive": True,
+        }
+        self._units.insert(0, unit)
+        return dict(unit)
+
+    def update_unit(self, unit_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        for u in self._units:
+            if u["id"] == unit_id:
+                for key in ("name", "dailyLimit", "isPcdAccessible", "hasPriorityService", "isActive"):
+                    if key in data:
+                        u[key] = data[key]
+                if "dailyLimit" in data:
+                    u["dailyCapacity"] = data["dailyLimit"]
+                return dict(u)
+        return None
+
+    def deactivate_unit(self, unit_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_unit(unit_id, {"isActive": False})
 
     def get_services(self) -> List[Dict[str, Any]]:
         return [s for s in self._services if s.get("isActive", True)]
@@ -340,11 +455,72 @@ class CatalogInMemoryRepository:
     def get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
         for s in self._services:
             if s["id"] == service_id:
-                return s
+                return dict(s)
         return None
+
+    def create_service(self, data: Dict[str, Any], created_by_id: Optional[str] = None) -> Dict[str, Any]:
+        agency = self.get_agency_by_id(data["agencyId"])
+        is_free = bool(data.get("isFree", True))
+        cost_amount = None if is_free else float(data.get("costAmount") or 0)
+        deadline = int(data.get("averageDeadlineDays", 5))
+        cat_slug = normalize_category_slug(data.get("category", "documents"))
+        svc = {
+            "id": str(uuid.uuid4()),
+            "name": data["name"].strip(),
+            "category": category_slug_to_label(cat_slug),
+            "categorySlug": cat_slug,
+            "channel": data.get("channel", "inPerson"),
+            "agencyId": data["agencyId"],
+            "agencyAcronym": agency["acronym"] if agency else "SOSP",
+            "agencyName": agency["name"] if agency else "Governo de Alagoas",
+            "isFree": is_free,
+            "costAmount": cost_amount,
+            "cost": "Gratuito" if is_free else f"R$ {cost_amount:.2f}",
+            "averageDeadlineDays": deadline,
+            "estimatedDuration": "Imediato" if deadline == 0 else f"{deadline} dias úteis",
+            "summary": data["description"].strip()[:160],
+            "description": data["description"].strip(),
+            "whoCanUse": data.get("whoCanUse", "Cidadãos residentes em Alagoas.").strip(),
+            "targetAudience": data.get("whoCanUse", "Cidadãos residentes em Alagoas.").strip(),
+            "prerequisites": data.get("prerequisites", "").strip(),
+            "externalUrl": data.get("externalUrl", "").strip() or None,
+            "updatedAt": "2026-11-22T00:00:00Z",
+            "unitCount": 1,
+            "cities": ["Maceió"],
+            "documents": [],
+            "steps": [],
+            "isActive": True,
+        }
+        self._services.insert(0, svc)
+        return dict(svc)
+
+    def update_service(self, service_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        for s in self._services:
+            if s["id"] == service_id:
+                if "name" in data:
+                    s["name"] = data["name"].strip()
+                if "description" in data:
+                    s["description"] = data["description"].strip()
+                    s["summary"] = s["description"][:160]
+                if "category" in data:
+                    slug = normalize_category_slug(data["category"])
+                    s["categorySlug"] = slug
+                    s["category"] = category_slug_to_label(slug)
+                if "channel" in data:
+                    s["channel"] = data["channel"]
+                if "isActive" in data:
+                    s["isActive"] = bool(data["isActive"])
+                return dict(s)
+        return None
+
+    def deactivate_service(self, service_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_service(service_id, {"isActive": False})
 
     def get_categories(self) -> List[str]:
         return self._categories
+
+    def list_faqs(self) -> List[Dict[str, Any]]:
+        return []
 
 _catalog_memory_repository = CatalogInMemoryRepository()
 
@@ -360,6 +536,7 @@ class CatalogDjangoORMRepository:
                 "id": str(a.id),
                 "name": a.name,
                 "acronym": a.acronym,
+                "sphere": a.sphere,
                 "description": a.description or "",
                 "isActive": a.is_active,
             }
@@ -375,6 +552,34 @@ class CatalogDjangoORMRepository:
             return None
         if not a:
             return None
+        return {
+            "id": str(a.id),
+            "name": a.name,
+            "acronym": a.acronym,
+            "sphere": a.sphere,
+            "description": a.description or "",
+            "isActive": a.is_active,
+        }
+
+    def create_agency(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        from .models import Agency
+        from django.db import IntegrityError
+        from common.exceptions import ProblemDetailsException
+
+        try:
+            a = Agency.objects.create(
+                name=data["name"].strip(),
+                acronym=data["acronym"].strip().upper(),
+                sphere=data.get("sphere", "state"),
+                description=(data.get("description") or "").strip() or None,
+                is_active=True,
+            )
+        except IntegrityError:
+            raise ProblemDetailsException(
+                detail="Já existe um órgão ativo cadastrado com esta sigla ou nome.",
+                title="Órgão duplicado",
+                status_code=409,
+            )
         return {
             "id": str(a.id),
             "name": a.name,
@@ -416,33 +621,60 @@ class CatalogDjangoORMRepository:
             "isActive": a.is_active,
         }
 
+    def deactivate_agency(self, agency_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_agency(agency_id, {"isActive": False})
+
+    @staticmethod
+    def _serialize_unit(u, opening_hours_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        uid = str(u.id)
+        zip_digits = u.zip_code or ""
+        cep_formatted = f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else zip_digits
+        hours = (opening_hours_map or {}).get(uid, "08:00 às 17:00 (Seg a Sex)")
+        return {
+            "id": uid,
+            "agencyId": str(u.agency_id),
+            "name": u.name,
+            "cep": cep_formatted,
+            "zipCode": zip_digits,
+            "street": u.street,
+            "number": u.address_number,
+            "neighborhood": u.neighborhood,
+            "city": u.city,
+            "state": u.state,
+            "phone": u.phone or "",
+            "email": u.email or "",
+            "openingHours": hours,
+            "dailyLimit": u.daily_limit,
+            "dailyCapacity": u.daily_limit,
+            "latitude": float(u.latitude) if u.latitude is not None else None,
+            "longitude": float(u.longitude) if u.longitude is not None else None,
+            "isPcdAccessible": bool(u.is_accessible),
+            "hasPriorityService": bool(u.has_priority_service),
+            "isActive": u.is_active,
+        }
+
     def get_units(self, agency_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        from .models import Unit
+        from .models import Unit, UnitOpeningHour
+        from django.core.exceptions import ValidationError
+
         qs = Unit.objects.filter(is_active=True, deleted_at__isnull=True).select_related("agency").order_by("name")
         if agency_id:
-            qs = qs.filter(agency_id=agency_id)
-        return [
-            {
-                "id": str(u.id),
-                "agencyId": str(u.agency_id),
-                "name": u.name,
-                "street": u.street,
-                "number": u.address_number,
-                "neighborhood": u.neighborhood,
-                "city": u.city,
-                "state": u.state,
-                "zipCode": u.zip_code,
-                "phone": u.phone or "",
-                "dailyCapacity": u.daily_limit,
-                "latitude": float(u.latitude) if u.latitude is not None else None,
-                "longitude": float(u.longitude) if u.longitude is not None else None,
-                "isActive": u.is_active,
-            }
-            for u in qs
-        ]
+            try:
+                qs = qs.filter(agency_id=agency_id)
+            except (ValidationError, ValueError):
+                return []
+        units = list(qs)
+        unit_ids = [u.id for u in units]
+        hours_map: Dict[str, str] = {}
+        if unit_ids:
+            for oh in UnitOpeningHour.objects.filter(unit_id__in=unit_ids).order_by("weekday"):
+                uid = str(oh.unit_id)
+                if uid not in hours_map:
+                    hours_map[uid] = f"{oh.opens_at.strftime('%H:%M')} às {oh.closes_at.strftime('%H:%M')} (Seg a Sex)"
+        return [self._serialize_unit(u, hours_map) for u in units]
 
     def get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
-        from .models import Unit
+        from .models import Unit, UnitOpeningHour
         from django.core.exceptions import ValidationError
         try:
             u = Unit.objects.filter(id=unit_id, is_active=True, deleted_at__isnull=True).first()
@@ -450,43 +682,188 @@ class CatalogDjangoORMRepository:
             return None
         if not u:
             return None
+        oh = UnitOpeningHour.objects.filter(unit=u).order_by("weekday").first()
+        hours_map = {}
+        if oh:
+            hours_map[str(u.id)] = f"{oh.opens_at.strftime('%H:%M')} às {oh.closes_at.strftime('%H:%M')} (Seg a Sex)"
+        return self._serialize_unit(u, hours_map)
+
+    def create_unit(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        import datetime as dt
+        from .models import Agency, Unit, UnitOpeningHour
+        from django.db import transaction
+        from common.exceptions import ProblemDetailsException
+
+        agency = Agency.objects.filter(id=data["agencyId"], deleted_at__isnull=True).first()
+        if not agency:
+            raise ProblemDetailsException(
+                detail="Órgão informado para a unidade não foi encontrado.",
+                title="Órgão inválido",
+                status_code=400,
+            )
+
+        with transaction.atomic():
+            u = Unit.objects.create(
+                agency=agency,
+                name=data["name"].strip(),
+                zip_code=data["zipCode"],
+                street=data["street"].strip(),
+                address_number=data.get("number", "S/N").strip()[:10],
+                neighborhood=data.get("neighborhood", "Centro").strip(),
+                city=data.get("city", "Maceió").strip(),
+                state=data.get("state", "AL").strip().upper()[:2],
+                phone=data.get("phone") or None,
+                email=data.get("email") or None,
+                latitude=Decimal(str(data["latitude"])) if data.get("latitude") is not None else None,
+                longitude=Decimal(str(data["longitude"])) if data.get("longitude") is not None else None,
+                is_accessible=bool(data.get("isPcdAccessible", True)),
+                has_priority_service=bool(data.get("hasPriorityService", True)),
+                daily_limit=int(data.get("dailyLimit", 60)),
+                is_active=True,
+            )
+            for weekday in range(1, 6):
+                UnitOpeningHour.objects.create(
+                    unit=u,
+                    weekday=weekday,
+                    opens_at=dt.time(8, 0),
+                    closes_at=dt.time(17, 0),
+                )
+        return self._serialize_unit(u)
+
+    def update_unit(self, unit_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        from .models import Unit
+        from django.utils import timezone
+        from django.core.exceptions import ValidationError
+
+        try:
+            u = Unit.objects.filter(id=unit_id, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
+        if not u:
+            return None
+        if "name" in data:
+            u.name = data["name"].strip()
+        if "dailyLimit" in data:
+            u.daily_limit = int(data["dailyLimit"])
+        if "isPcdAccessible" in data:
+            u.is_accessible = bool(data["isPcdAccessible"])
+        if "hasPriorityService" in data:
+            u.has_priority_service = bool(data["hasPriorityService"])
+        if "isActive" in data:
+            u.is_active = bool(data["isActive"])
+            if not u.is_active and not u.deleted_at:
+                u.deleted_at = timezone.now()
+        u.save()
+        return self._serialize_unit(u)
+
+    def deactivate_unit(self, unit_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_unit(unit_id, {"isActive": False})
+
+    @staticmethod
+    def _serialize_service(
+        s,
+        agency_info: Optional[Dict[str, str]] = None,
+        units_info: Optional[List[Any]] = None,
+        steps_list: Optional[List[Any]] = None,
+        docs_list: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        agency = agency_info or {}
+        units = units_info or []
+        cities = sorted({u.city for u in units if getattr(u, "city", None)})
+        steps = [
+            {
+                "stepOrder": step.step_order,
+                "stepNumber": step.step_order,
+                "title": step.title,
+                "description": step.description,
+                "estimatedTime": step.estimated_time or "",
+            }
+            for step in (steps_list or [])
+        ]
+        documents = [
+            {
+                "id": str(doc.id),
+                "name": doc.name,
+                "isRequired": bool(doc.is_mandatory),
+                "description": doc.template_url or "",
+                "sampleUrl": doc.template_url or None,
+            }
+            for doc in (docs_list or [])
+        ]
+        cost_float = float(s.cost_amount) if s.cost_amount is not None else None
+        deadline_days = int(s.average_deadline_days or 0)
+        desc = s.detailed_description or ""
         return {
-            "id": str(u.id),
-            "agencyId": str(u.agency_id),
-            "name": u.name,
-            "street": u.street,
-            "number": u.address_number,
-            "neighborhood": u.neighborhood,
-            "city": u.city,
-            "state": u.state,
-            "zipCode": u.zip_code,
-            "phone": u.phone or "",
-            "dailyCapacity": u.daily_limit,
-            "latitude": float(u.latitude) if u.latitude is not None else None,
-            "longitude": float(u.longitude) if u.longitude is not None else None,
-            "isActive": u.is_active,
+            "id": str(s.id),
+            "name": s.name,
+            "summary": desc[:160] + ("..." if len(desc) > 160 else ""),
+            "description": desc,
+            "category": category_slug_to_label(s.category),
+            "categorySlug": s.category,
+            "channel": s.channel,
+            "agencyId": agency.get("id", ""),
+            "agencyAcronym": agency.get("acronym", "SOSP"),
+            "agencyName": agency.get("name", "Governo de Alagoas"),
+            "isFree": bool(s.is_free),
+            "costAmount": cost_float,
+            "cost": "Gratuito" if s.is_free else (f"R$ {cost_float:.2f}" if cost_float is not None else "Pago"),
+            "averageDeadlineDays": deadline_days,
+            "estimatedDuration": "Imediato" if deadline_days == 0 else f"{deadline_days} dias úteis",
+            "whoCanUse": s.eligibility or "Cidadãos residentes em Alagoas.",
+            "targetAudience": s.eligibility or "Cidadãos residentes em Alagoas.",
+            "prerequisites": s.prerequisites or "",
+            "externalUrl": s.external_url or None,
+            "updatedAt": s.updated_at.isoformat() if s.updated_at else "",
+            "unitCount": len(units),
+            "cities": cities,
+            "steps": steps,
+            "documents": documents,
+            "isActive": s.status == "active",
         }
 
     def get_services(self) -> List[Dict[str, Any]]:
-        from .models import Service
-        qs = Service.objects.filter(status="active", deleted_at__isnull=True).order_by("name")
+        from .models import Service, ServiceAgency, UnitService, ServiceStep, ServiceDocument
+
+        services = list(Service.objects.filter(status="active", deleted_at__isnull=True).order_by("name"))
+        if not services:
+            return []
+        svc_ids = [s.id for s in services]
+
+        agency_by_svc: Dict[Any, Dict[str, str]] = {}
+        for sa in ServiceAgency.objects.filter(service_id__in=svc_ids).select_related("agency"):
+            if sa.service_id not in agency_by_svc and sa.agency:
+                agency_by_svc[sa.service_id] = {
+                    "id": str(sa.agency.id),
+                    "acronym": sa.agency.acronym,
+                    "name": sa.agency.name,
+                }
+
+        units_by_svc: Dict[Any, List[Any]] = {}
+        for us in UnitService.objects.filter(service_id__in=svc_ids, is_active=True).select_related("unit"):
+            if us.unit and us.unit.is_active and us.unit.deleted_at is None:
+                units_by_svc.setdefault(us.service_id, []).append(us.unit)
+
+        steps_by_svc: Dict[Any, List[Any]] = {}
+        for st in ServiceStep.objects.filter(service_id__in=svc_ids).order_by("step_order"):
+            steps_by_svc.setdefault(st.service_id, []).append(st)
+
+        docs_by_svc: Dict[Any, List[Any]] = {}
+        for doc in ServiceDocument.objects.filter(service_id__in=svc_ids).order_by("name"):
+            docs_by_svc.setdefault(doc.service_id, []).append(doc)
+
         return [
-            {
-                "id": str(s.id),
-                "name": s.name,
-                "summary": s.detailed_description[:120] if s.detailed_description else "",
-                "description": s.detailed_description,
-                "category": s.category,
-                "channel": s.channel,
-                "cost": "Gratuito" if s.is_free else (f"R$ {s.cost_amount:.2f}" if s.cost_amount else "Pago"),
-                "estimatedDuration": f"{s.average_deadline_days} dias" if s.average_deadline_days else "Imediato",
-                "isActive": s.status == "active",
-            }
-            for s in qs
+            self._serialize_service(
+                s,
+                agency_info=agency_by_svc.get(s.id),
+                units_info=units_by_svc.get(s.id),
+                steps_list=steps_by_svc.get(s.id),
+                docs_list=docs_by_svc.get(s.id),
+            )
+            for s in services
         ]
 
     def get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
-        from .models import Service, ServiceStep, ServiceDocument
+        from .models import Service, ServiceAgency, UnitService, ServiceStep, ServiceDocument
         from django.core.exceptions import ValidationError
         try:
             s = Service.objects.filter(id=service_id, deleted_at__isnull=True).first()
@@ -494,35 +871,130 @@ class CatalogDjangoORMRepository:
             return None
         if not s:
             return None
-        steps = [
-            {"stepNumber": step.step_order, "title": step.title, "description": step.description}
-            for step in ServiceStep.objects.filter(service=s).order_by("step_order")
+        sa = ServiceAgency.objects.filter(service=s).select_related("agency").first()
+        agency_info = (
+            {"id": str(sa.agency.id), "acronym": sa.agency.acronym, "name": sa.agency.name}
+            if sa and sa.agency
+            else {}
+        )
+        units = [
+            us.unit
+            for us in UnitService.objects.filter(service=s, is_active=True).select_related("unit")
+            if us.unit and us.unit.is_active and us.unit.deleted_at is None
         ]
-        documents = [
-            {"name": doc.name, "isRequired": doc.is_mandatory, "description": doc.template_url or ""}
-            for doc in ServiceDocument.objects.filter(service=s).order_by("name")
-        ]
-        return {
-            "id": str(s.id),
-            "name": s.name,
-            "summary": s.detailed_description[:120] if s.detailed_description else "",
-            "description": s.detailed_description,
-            "category": s.category,
-            "channel": s.channel,
-            "cost": "Gratuito" if s.is_free else (f"R$ {s.cost_amount:.2f}" if s.cost_amount else "Pago"),
-            "estimatedDuration": f"{s.average_deadline_days} dias" if s.average_deadline_days else "Imediato",
-            "targetAudience": s.eligibility,
-            "steps": steps,
-            "documents": documents,
-            "isActive": s.status == "active",
-        }
+        steps = list(ServiceStep.objects.filter(service=s).order_by("step_order"))
+        docs = list(ServiceDocument.objects.filter(service=s).order_by("name"))
+        return self._serialize_service(
+            s,
+            agency_info=agency_info,
+            units_info=units,
+            steps_list=steps,
+            docs_list=docs,
+        )
+
+    def create_service(self, data: Dict[str, Any], created_by_id: Optional[str] = None) -> Dict[str, Any]:
+        from .models import Agency, Unit, Service, ServiceAgency, UnitService
+        from django.db import transaction
+        from common.exceptions import ProblemDetailsException
+
+        agency = Agency.objects.filter(id=data["agencyId"], deleted_at__isnull=True).first()
+        if not agency:
+            raise ProblemDetailsException(
+                detail="Órgão informado para o serviço não foi encontrado.",
+                title="Órgão inválido",
+                status_code=400,
+            )
+
+        is_free = bool(data.get("isFree", True))
+        cost_val = None if is_free else Decimal(str(round(float(data.get("costAmount") or 0), 2)))
+        cat_slug = normalize_category_slug(data.get("category", "documents"))
+
+        with transaction.atomic():
+            s = Service.objects.create(
+                name=data["name"].strip(),
+                category=cat_slug,
+                detailed_description=data["description"].strip(),
+                eligibility=data.get("whoCanUse", "Cidadãos residentes em Alagoas.").strip(),
+                prerequisites=(data.get("prerequisites") or "").strip() or None,
+                is_free=is_free,
+                cost_amount=cost_val,
+                average_deadline_days=int(data.get("averageDeadlineDays", 5)),
+                channel=data.get("channel", "inPerson"),
+                external_url=(data.get("externalUrl") or "").strip() or None,
+                status="active",
+                created_by_id=created_by_id if created_by_id and len(str(created_by_id)) == 36 else None,
+            )
+            ServiceAgency.objects.create(service=s, agency=agency)
+            agency_units = list(Unit.objects.filter(agency=agency, is_active=True, deleted_at__isnull=True))
+            for u in agency_units:
+                UnitService.objects.create(unit=u, service=s, is_active=True)
+
+        return self.get_service_by_id(str(s.id)) or self._serialize_service(s)
+
+    def update_service(self, service_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        from .models import Service
+        from django.utils import timezone
+        from django.core.exceptions import ValidationError
+
+        try:
+            s = Service.objects.filter(id=service_id, deleted_at__isnull=True).first()
+        except (ValidationError, ValueError):
+            return None
+        if not s:
+            return None
+        if "name" in data:
+            s.name = data["name"].strip()
+        if "category" in data:
+            s.category = normalize_category_slug(data["category"])
+        if "channel" in data:
+            s.channel = data["channel"]
+        if "description" in data:
+            s.detailed_description = data["description"].strip()
+        if "whoCanUse" in data:
+            s.eligibility = data["whoCanUse"].strip()
+        if "isFree" in data:
+            s.is_free = bool(data["isFree"])
+            if s.is_free:
+                s.cost_amount = None
+        if "costAmount" in data and not s.is_free and data["costAmount"] is not None:
+            s.cost_amount = Decimal(str(round(float(data["costAmount"]), 2)))
+        if "averageDeadlineDays" in data:
+            s.average_deadline_days = int(data["averageDeadlineDays"])
+        if "isActive" in data:
+            if not bool(data["isActive"]):
+                s.status = "inactive"
+                if not s.deleted_at:
+                    s.deleted_at = timezone.now()
+            else:
+                s.status = "active"
+        s.save()
+        return self.get_service_by_id(str(s.id)) or self._serialize_service(s)
+
+    def deactivate_service(self, service_id: str) -> Optional[Dict[str, Any]]:
+        return self.update_service(service_id, {"isActive": False})
 
     def get_categories(self) -> List[str]:
         from .models import Service
         cats = Service.objects.filter(status="active", deleted_at__isnull=True).values_list("category", flat=True).distinct()
         result = ["Todos"]
-        result.extend(sorted(list(set(cats))))
+        result.extend(sorted({category_slug_to_label(c) for c in cats if c}))
         return result
+
+    def list_faqs(self) -> List[Dict[str, Any]]:
+        from .models import Faq
+        try:
+            qs = Faq.objects.filter(is_active=True).order_by("-created_at")
+            return [
+                {
+                    "id": str(f.id),
+                    "category": category_slug_to_label(f.category or "general"),
+                    "question": f.question,
+                    "answer": f.answer,
+                }
+                for f in qs
+            ]
+        except Exception:
+            return []
 
 
 def get_catalog_repository():

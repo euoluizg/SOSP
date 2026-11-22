@@ -12,7 +12,11 @@ export type ServiceCategory =
   | "Transporte"
   | "Assistência Social"
   | "Tributos"
-  | "Trabalho";
+  | "Trabalho"
+  | "Habitação"
+  | "Meio Ambiente"
+  | "Empresas"
+  | "Geral";
 
 export type ProtocolStatus =
   | "received"
@@ -41,6 +45,7 @@ export interface Service {
   id: string;
   name: string;
   category: ServiceCategory;
+  categorySlug?: string;
   channel: ServiceChannel;
   agencyId: string;
   agencyAcronym: string;
@@ -55,6 +60,7 @@ export interface Service {
   externalUrl?: string;
   updatedAt: string;
   unitCount: number;
+  cities?: string[];
   documents: ServiceDocument[];
   steps: ServiceStep[];
 }
@@ -196,5 +202,52 @@ export interface ProblemDetails {
   instance?: string;
   traceId?: string;
   errors?: Array<{ field: string; message: string }>;
+}
+
+export interface InternalUserAccount {
+  id: string;
+  fullName: string;
+  email: string;
+  cpfMasked: string;
+  registrationNumber: string;
+  agencyId?: string | null;
+  unitId?: string | null;
+  role: string;
+  canManageCatalog: boolean;
+  mustChangePassword?: boolean;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actorUserId: string;
+  action: string;
+  targetTable: string;
+  targetId: string;
+  detail: string;
+  ipAddress: string;
+  createdAt: string;
+}
+
+export interface AppointmentsReportSummary {
+  period: { start: string; end: string };
+  scope: { agencyId?: string | null; unitId?: string | null };
+  metrics: {
+    totalAppointments: number;
+    scheduled: number;
+    inProgress?: number;
+    completed: number;
+    cancelled: number;
+    noShow: number;
+    attendanceRate: number;
+  };
+  byService?: Array<{
+    serviceName: string;
+    total: number;
+    completed: number;
+    noShow: number;
+  }>;
+  recentQueue: Appointment[];
 }
 
