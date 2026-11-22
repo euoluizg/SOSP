@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 1](01-product-specs.md) · [Pilar 2](02-design-ux.md) · [Pilar 3](03-architecture.md) · [Pilar 5](05-engineering-devops.md)
 > **Documentos complementares:** [Casos de uso](use-cases/README.md) · [Índice de telas](design/README.md) · [ADR-007 — Feature flags](adr/ADR-007-feature-flags.md) · [ADR-008 — Supabase](adr/ADR-008-supabase-postgresql-gerenciado.md)
 > **Artefatos executáveis:** [`schema.sql`](database/schema.sql) · [`openapi.yaml`](api/openapi.yaml)
@@ -554,9 +554,11 @@ CREATE TABLE accountsInternalUser (
   createdAt           timestamptz NOT NULL DEFAULT now(),
   updatedAt           timestamptz NOT NULL DEFAULT now(),
   deletedAt           timestamptz,
-  CONSTRAINT chkAccountsInternalUserRole CHECK (role IN ('administrator', 'servant')),
-  CONSTRAINT chkAccountsInternalUserCpf CHECK (cpf ~ '^[0-9]{11}$'),
-  CONSTRAINT chkAccountsInternalUserRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9]{1,20}$')
+  CONSTRAINT chkAccountsInternalCpf CHECK (cpf ~ '^[0-9]{11}$'),
+  CONSTRAINT chkAccountsInternalEmail CHECK (email ~* '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+  CONSTRAINT chkAccountsInternalRole CHECK (role IN ('superadmin', 'admin', 'gestor', 'server', 'manager', 'servant', 'administrator')),
+  CONSTRAINT chkAccountsInternalRegistration CHECK (registrationNumber ~ '^[A-Za-z0-9-]{1,20}$'),
+  CONSTRAINT chkAccountsInternalName CHECK (char_length(fullName) >= 3)
 );
 
 CREATE UNIQUE INDEX uqAccountsInternalUserCpf ON accountsInternalUser (cpf) WHERE deletedAt IS NULL;
@@ -1176,6 +1178,8 @@ CREATE TRIGGER trgNotificationsPreferenceUpdatedAt BEFORE UPDATE ON notification
 -- DADOS INICIAIS
 -- =============================================================================
 
+-- Em ambientes Django, aplicar accounts.0003_seed_gender_catalog com a role
+-- administrativa. O cadastro consulta referências ativas com a role de runtime.
 INSERT INTO accountsGender (name, sortOrder) VALUES
   ('Feminino', 1),
   ('Masculino', 2),

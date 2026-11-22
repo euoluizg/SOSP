@@ -1,0 +1,135 @@
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from common.security.permissions import HasChangedTemporaryPassword, IsAdminUser
+from .serializers import (
+    CitizenRegisterSerializer,
+    CitizenLoginSerializer,
+    PasswordRecoveryRequestSerializer,
+    PasswordResetSerializer,
+    ChangePasswordSerializer,
+    InternalUserCreateSerializer,
+)
+from .services import AccountService
+from .repositories import citizen_repository
+from common.exceptions import ProblemDetailsException
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = CitizenRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        citizen = AccountService.register_citizen(serializer.validated_data)
+        return Response(citizen, status=status.HTTP_201_CREATED)
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = CitizenLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.login_citizen(
+            cpf=serializer.validated_data["cpf"],
+            password=serializer.validated_data["password"],
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        auth_header = request.headers.get("Authorization", "")
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        result = AccountService.logout_citizen(token)
+        return Response(result, status=status.HTTP_200_OK)
+
+class PasswordRecoveryView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordRecoveryRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.request_password_recovery(serializer.validated_data["cpf"])
+        return Response(result, status=status.HTTP_200_OK)
+
+class PasswordResetView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.reset_password(
+            cpf=serializer.validated_data["cpf"],
+            code=serializer.validated_data["code"],
+            new_password=serializer.validated_data["newPassword"],
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.change_password(
+            user=request.user,
+            current_password=serializer.validated_data["currentPassword"],
+            new_password=serializer.validated_data["newPassword"],
+            confirm_password=serializer.validated_data.get("confirmPassword"),
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+class CitizenMeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user and getattr(request.user, "is_authenticated", False):
+            citizen_id = str(request.user.id)
+        else:
+            citizen_id = "citizen-001"
+        citizen = citizen_repository.get_by_id(citizen_id)
+        if not citizen:
+            raise ProblemDetailsException(detail="Perfil não encontrado.", status_code=404)
+        safe_copy = dict(citizen)
+        safe_copy.pop("passwordHash", None)
+        return Response(safe_copy, status=status.HTTP_200_OK)
+
+
+class InternalUsersListCreateView(APIView):
+    """Listagem e provisionamento de usuários internos (RF-12 — restrito a Admin/Superadmin)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsAdminUser]
+
+    def get(self, request):
+        users = AccountService.list_internal_users()
+        return Response(users, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = InternalUserCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        created = AccountService.create_internal_user(serializer.validated_data, actor_user=request.user)
+        return Response(created, status=status.HTTP_201_CREATED)
+
+
+class InternalUserDetailView(APIView):
+    """Desativação lógica de usuário interno (RN-40 / RS-05 — restrito a Admin/Superadmin)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsAdminUser]
+
+    def delete(self, request, user_id):
+        result = AccountService.deactivate_internal_user(user_id=user_id, actor_user=request.user)
+        return Response(result, status=status.HTTP_200_OK)
+
+    def patch(self, request, user_id):
+        if request.data.get("isActive") is False:
+            result = AccountService.deactivate_internal_user(user_id=user_id, actor_user=request.user)
+            return Response(result, status=status.HTTP_200_OK)
+        raise ProblemDetailsException(
+            detail="Somente a desativação lógica (isActive=false) é suportada nesta rota.",
+            status_code=400,
+        )
+

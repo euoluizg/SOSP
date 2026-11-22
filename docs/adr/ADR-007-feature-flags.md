@@ -2,7 +2,7 @@
 
 - **Status:** Aceito
 - **Data:** 31/10/2026
-- **Decisores:** Equipe de Engenharia de Software — CESMAC
+- **Decisores:** Arthur Franco e Luiz Gustavo — CESMAC
 - **Substitui:** —
 - **Substituído por:** —
 

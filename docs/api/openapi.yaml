@@ -15,7 +15,7 @@ info:
     - `Idempotency-Key` é obrigatório em criação de agendamento.
     - Datas em `YYYY-MM-DD`; horários em `HH:MM`; timestamps em ISO 8601 UTC.
   contact:
-    name: Equipe de Engenharia de Software — CESMAC
+    name: Arthur Franco e Luiz Gustavo — CESMAC
     email: equipe.sosp@cesmac.edu.br
   license:
     name: Uso interno
@@ -139,6 +139,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CitizenRegistrationResponse'
+        '400':
+          description: Dados de cadastro inválidos
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: CPF ou e-mail já cadastrado
           content:
@@ -147,6 +153,12 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Cadastro temporariamente indisponível por ausência de referência ativa no catálogo de gêneros
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /auth/internal/login:
     post:
@@ -280,6 +292,52 @@ paths:
           description: Código inválido ou expirado
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Altera a senha do usuário autenticado (obrigatório no primeiro acesso institucional)
+      operationId: changePassword
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                  description: Senha atual ou provisória temporária
+                newPassword:
+                  type: string
+                  format: password
+                  description: Nova senha (mínimo 8 caracteres, maiúscula, minúscula, dígito e símbolo)
+                confirmPassword:
+                  type: string
+                  format: password
+                  description: Confirmação da nova senha
+      responses:
+        '200':
+          description: Senha alterada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+                  mustChangePassword:
+                    type: boolean
+        '400':
+          description: Senha atual incorreta, nova senha fraca ou igual à anterior
+        '401':
+          description: Usuário não autenticado ou token inválido
 
   /citizens/me:
     get:
@@ -1992,6 +2050,11 @@ components:
           type: string
         gender:
           type: string
+        genderDescription:
+          type: string
+          maxLength: 120
+          nullable: true
+          description: Descrição da identidade de gênero quando selecionada a opção 'Outro'
         isPcd:
           type: boolean
         pcdDescription:

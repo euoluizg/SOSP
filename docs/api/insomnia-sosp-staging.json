@@ -1,0 +1,302 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-11-22T23:20:00.000Z",
+  "__export_source": "sosp-api-collection-generator",
+  "resources": [
+    {
+      "_id": "wrk_sosp_staging",
+      "parentId": null,
+      "name": "SOSP API — Staging (Render + Supabase)",
+      "description": "Coleção oficial de testes da API REST SOSP (/api/v1) pronta para importar no Insomnia.",
+      "scope": "collection",
+      "_type": "workspace"
+    },
+    {
+      "_id": "env_sosp_base",
+      "parentId": "wrk_sosp_staging",
+      "name": "Staging (Render)",
+      "data": {
+        "baseUrl": "https://sosp-backend-staging.onrender.com/api/v1",
+        "token": "",
+        "citizenId": "",
+        "agencyId": "",
+        "unitId": "",
+        "serviceId": "",
+        "appointmentId": "",
+        "protocolNumber": "",
+        "internalUserId": ""
+      },
+      "_type": "environment"
+    },
+    {
+      "_id": "fld_public",
+      "parentId": "wrk_sosp_staging",
+      "name": "01. Saúde e Catálogo Público",
+      "_type": "request_group"
+    },
+    {
+      "_id": "fld_auth",
+      "parentId": "wrk_sosp_staging",
+      "name": "02. Autenticação e Cidadão (RF-01 / RF-02)",
+      "_type": "request_group"
+    },
+    {
+      "_id": "fld_scheduling",
+      "parentId": "wrk_sosp_staging",
+      "name": "03. Guia, Agendamento e Protocolos (RF-07 a RF-09)",
+      "_type": "request_group"
+    },
+    {
+      "_id": "fld_server",
+      "parentId": "wrk_sosp_staging",
+      "name": "04. Operação do Servidor e Relatórios (RF-09 / RF-14)",
+      "_type": "request_group"
+    },
+    {
+      "_id": "fld_admin",
+      "parentId": "wrk_sosp_staging",
+      "name": "05. Gestão Administrativa e Auditoria (RF-03 / RF-05 / RF-12)",
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_health",
+      "parentId": "fld_public",
+      "name": "Health Check",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/health",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_list_agencies",
+      "parentId": "fld_public",
+      "name": "Listar Órgãos",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/agencies",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_list_units",
+      "parentId": "fld_public",
+      "name": "Listar Unidades",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/units",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_search_services",
+      "parentId": "fld_public",
+      "name": "Buscar Serviços (tirar rg)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/services?q=tirar%20rg&page=1&pageSize=10",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_service_detail",
+      "parentId": "fld_public",
+      "name": "Detalhe do Serviço (8 Blocos)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/services/{{ _.serviceId }}",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_unit_slots",
+      "parentId": "fld_public",
+      "name": "Consultar Slots de 30 min (RN-18)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/units/{{ _.unitId }}/slots?date=2026-11-25",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_list_faqs",
+      "parentId": "fld_public",
+      "name": "Listar FAQ Público",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/feedback/faq",
+      "headers": [],
+      "_type": "request"
+    },
+    {
+      "_id": "req_login_admin",
+      "parentId": "fld_auth",
+      "name": "Login Admin (CPF 99988877714)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/auth/login",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"cpf\": \"99988877714\",\n  \"password\": \"INFORME_SENHA_ADMIN\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_login_server",
+      "parentId": "fld_auth",
+      "name": "Login Servidor (CPF 33366699957 ou SSP-1001)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/auth/login",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"cpf\": \"33366699957\",\n  \"password\": \"INFORME_SENHA_SERVIDOR\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_register_citizen",
+      "parentId": "fld_auth",
+      "name": "Cadastrar Cidadão (RF-01)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/auth/register",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"fullName\": \"Maria Teste Homologacao\",\n  \"cpf\": \"52998224725\",\n  \"birthDate\": \"1995-04-10\",\n  \"gender\": \"F\",\n  \"motherName\": \"Ana Maria Teste\",\n  \"email\": \"maria.homolog@exemplo.al.gov.br\",\n  \"phone\": \"82999887766\",\n  \"password\": \"INFORME_SENHA_FORTE\",\n  \"isPcd\": false,\n  \"cep\": \"57020100\",\n  \"street\": \"Rua do Comercio\",\n  \"number\": \"100\",\n  \"neighborhood\": \"Centro\",\n  \"city\": \"Maceio\",\n  \"state\": \"AL\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_citizen_me",
+      "parentId": "fld_auth",
+      "name": "Meu Perfil (/citizens/me)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/citizens/me",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_logout",
+      "parentId": "fld_auth",
+      "name": "Logout (Revogar Sessão)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/auth/logout",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_create_appointment",
+      "parentId": "fld_scheduling",
+      "name": "Criar Agendamento (Idempotency-Key)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/appointments",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ _.token }}" },
+        { "name": "Idempotency-Key", "value": "insomnia-test-0001" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"serviceId\": \"{{ _.serviceId }}\",\n  \"unitId\": \"{{ _.unitId }}\",\n  \"scheduledDate\": \"2026-11-25\",\n  \"scheduledTime\": \"09:00\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_citizen_appointments",
+      "parentId": "fld_scheduling",
+      "name": "Meus Agendamentos",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/citizens/{{ _.citizenId }}/appointments",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_protocol_timeline",
+      "parentId": "fld_scheduling",
+      "name": "Linha do Tempo do Protocolo",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/protocols/{{ _.protocolNumber }}/timeline",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_server_queue",
+      "parentId": "fld_server",
+      "name": "Fila Operacional da Unidade (RN-36)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/appointments/queue",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_server_update_status",
+      "parentId": "fld_server",
+      "name": "Atualizar Status do Atendimento (Chamar/Concluir)",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/appointments/{{ _.appointmentId }}/status",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ _.token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"status\": \"in_progress\",\n  \"note\": \"Chamado no Guiche 04 pelo Insomnia\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_reports_summary",
+      "parentId": "fld_server",
+      "name": "Relatório Consolidado de Agendamentos (RF-14)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/reports/appointments",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_admin_create_agency",
+      "parentId": "fld_admin",
+      "name": "Criar Órgão (Admin)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/agencies",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ _.token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Secretaria de Teste Insomnia\",\n  \"acronym\": \"STINS\",\n  \"sphere\": \"state\",\n  \"description\": \"Teste de integracao via Insomnia\"\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_admin_create_service",
+      "parentId": "fld_admin",
+      "name": "Criar Serviço Público (Admin)",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/services",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Authorization", "value": "Bearer {{ _.token }}" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Emissao de Declaracao Digital\",\n  \"category\": \"Documentos\",\n  \"channel\": \"online\",\n  \"agencyId\": \"{{ _.agencyId }}\",\n  \"description\": \"Emissao online de declaracao oficial.\",\n  \"whoCanUse\": \"Cidadaos residentes em Alagoas.\",\n  \"isFree\": true,\n  \"averageDeadlineDays\": 0\n}"
+      },
+      "_type": "request"
+    },
+    {
+      "_id": "req_admin_list_users",
+      "parentId": "fld_admin",
+      "name": "Listar Usuários Internos (RF-12)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/internal-users",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    },
+    {
+      "_id": "req_admin_audit",
+      "parentId": "fld_admin",
+      "name": "Consultar Trilha de Auditoria (RN-39)",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/audit/events",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ _.token }}" }],
+      "_type": "request"
+    }
+  ]
+}

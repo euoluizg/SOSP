@@ -1,0 +1,368 @@
+"""
+SOSP — Módulo de Autenticação Segura Django REST Framework (ADR-003, RF-01, RF-02).
+
+Implementa:
+1. Autenticação por token Bearer criptografado (HMAC-SHA256 URL-safe, sem dependência externa).
+2. Validação rigorosa de expiração temporal (RN-28: 30 minutos de inatividade).
+3. Extração confiável de identidade: user_id, role ('citizen', 'server', 'admin', 'superadmin'), agency_id.
+4. Re-validação de status no repositório (impede confiar exclusivamente em claims antigas se usuário foi desativado).
+5. Estabelecimento automático do contexto de segurança PostgreSQL no momento da autenticação.
+6. Usuário autenticado tipado (SospUser) compatível com DRF e com o contexto de segurança PostgreSQL.
+"""
+
+import hmac
+import hashlib
+import json
+import base64
+import time
+import uuid
+import logging
+from typing import Optional, Tuple, Dict, Any
+
+from django.conf import settings
+from rest_framework.authentication import BaseAuthentication, get_authorization_header
+from rest_framework.exceptions import AuthenticationFailed
+
+logger = logging.getLogger(__name__)
+
+
+class SospAnonymousUser:
+    """Representação de usuário anônimo / não autenticado no SOSP."""
+    id = None
+    role = "anonymous"
+    agency_id = None
+    is_authenticated = False
+    is_anonymous = True
+    is_staff = False
+    is_superuser = False
+
+    def __str__(self) -> str:
+        return "SospAnonymousUser"
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (4 - (len(data) % 4)) if len(data) % 4 != 0 else ""
+    return base64.urlsafe_b64decode((data + padding).encode("utf-8"))
+
+
+class SospUser:
+    """
+    Representação de usuário autenticado no SOSP.
+    Imutável, tipado e sem privilégios arbitrários.
+    """
+    def __init__(
+        self,
+        user_id: str | uuid.UUID,
+        role: str,
+        agency_id: str | uuid.UUID | None = None,
+        cpf: str = "",
+        full_name: str = "",
+        email: str = "",
+        is_active: bool = True,
+        unit_id: str | uuid.UUID | None = None,
+        must_change_password: bool = False,
+    ):
+        self.id = uuid.UUID(str(user_id)) if isinstance(user_id, str) and len(user_id) == 36 else user_id
+        self.role = role
+        self.agency_id = uuid.UUID(str(agency_id)) if isinstance(agency_id, str) and len(str(agency_id)) == 36 else (str(agency_id) if agency_id else None)
+        self.unit_id = uuid.UUID(str(unit_id)) if isinstance(unit_id, str) and len(str(unit_id)) == 36 else (str(unit_id) if unit_id else None)
+        self.cpf = cpf
+        self.full_name = full_name
+        self.email = email
+        self.is_active = is_active
+        self.must_change_password = bool(must_change_password)
+        self.is_authenticated = True
+        self.is_anonymous = False
+
+    @property
+    def is_citizen(self) -> bool:
+        return self.role in ("citizen", "cidadao")
+
+    @property
+    def is_server(self) -> bool:
+        return self.role in ("server", "servant", "servidor", "gestor", "manager")
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role in ("gestor", "manager")
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role in ("admin", "administrator", "superadmin", "administrador")
+
+    @property
+    def is_staff(self) -> bool:
+        return self.role in (
+            "server",
+            "admin",
+            "superadmin",
+            "servant",
+            "administrator",
+            "servidor",
+            "administrador",
+            "gestor",
+            "manager",
+        )
+
+    @property
+    def is_superuser(self) -> bool:
+        return self.role in ("superadmin", "administrator", "administrador")
+
+    def __str__(self) -> str:
+        return f"SospUser(id={self.id}, role={self.role}, agency={self.agency_id}, unit={self.unit_id})"
+
+
+def generate_sosp_token(
+    user_id: str | uuid.UUID,
+    role: str,
+    agency_id: str | uuid.UUID | None = None,
+    cpf: str = "",
+    full_name: str = "",
+    email: str = "",
+    expires_in_seconds: int = 1800,  # 30 minutos (RN-28)
+    unit_id: str | uuid.UUID | None = None,
+    must_change_password: bool = False,
+) -> str:
+    """
+    Gera um token criptográfico assinado HMAC-SHA256 (compatível com padrão JWT HS256).
+    Utiliza Django SECRET_KEY para a assinatura do token de transporte.
+    """
+    now = int(time.time())
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "sub": str(user_id),
+        "role": role,
+        "agency_id": str(agency_id) if agency_id else None,
+        "unit_id": str(unit_id) if unit_id else None,
+        "cpf": cpf,
+        "name": full_name,
+        "email": email,
+        "must_change_password": bool(must_change_password),
+        "iat": now,
+        "exp": now + expires_in_seconds,
+        "jti": uuid.uuid4().hex,
+    }
+
+    header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+
+    secret_key = settings.SECRET_KEY.encode("utf-8")
+    sig = hmac.new(secret_key, signing_input, hashlib.sha256).digest()
+    sig_b64 = _b64url_encode(sig)
+
+    return f"{header_b64}.{payload_b64}.{sig_b64}"
+
+
+def verify_sosp_token(token: str) -> Dict[str, Any]:
+    """
+    Verifica a autenticidade, integridade e validade temporal de um token.
+    Lança AuthenticationFailed em caso de violação.
+    """
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        raise AuthenticationFailed("Formato de token inválido.")
+
+    header_b64, payload_b64, sig_b64 = parts
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    secret_key = settings.SECRET_KEY.encode("utf-8")
+
+    expected_sig = hmac.new(secret_key, signing_input, hashlib.sha256).digest()
+    actual_sig = _b64url_decode(sig_b64)
+
+    if not hmac.compare_digest(expected_sig, actual_sig):
+        raise AuthenticationFailed("Assinatura do token de autenticação inválida.")
+
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        raise AuthenticationFailed("Payload do token corrompido.")
+
+    now = int(time.time())
+    exp = payload.get("exp")
+    if not exp or now > exp:
+        raise AuthenticationFailed("Sessão expirada por inatividade. Faça login novamente.")
+
+    return payload
+
+
+class SospTokenAuthentication(BaseAuthentication):
+    """
+    Autenticador oficial do DRF para o SOSP.
+    Lê o cabeçalho 'Authorization: Bearer <token>', re-valida status no repositório
+    e estabelece o contexto de segurança no banco de dados.
+    """
+    keyword = "Bearer"
+
+    def authenticate_header(self, request):
+        return self.keyword
+
+    def authenticate(self, request) -> Optional[Tuple[SospUser, str]]:
+        auth = get_authorization_header(request).split()
+
+        if not auth:
+            return None
+
+        if auth[0].decode("utf-8").lower() != self.keyword.lower():
+            return None
+
+        if len(auth) == 1:
+            raise AuthenticationFailed("Cabeçalho de autenticação sem token.")
+        elif len(auth) > 2:
+            raise AuthenticationFailed("Cabeçalho de autenticação mal formatado.")
+
+        token = auth[1].decode("utf-8")
+        payload = verify_sosp_token(token)
+
+        user_id = payload.get("sub")
+        role = payload.get("role", "citizen")
+        agency_id = payload.get("agency_id")
+        unit_id = payload.get("unit_id")
+
+        # Fail-closed: usuários institucionais com claim ausente ou nula exigem troca de senha por padrão
+        token_must_change = payload.get("must_change_password")
+        if role in ("server", "servant", "servidor", "gestor", "manager", "admin", "administrator", "superadmin", "administrador"):
+            initial_must_change = True if token_must_change is None else bool(token_must_change)
+        else:
+            initial_must_change = False if token_must_change is None else bool(token_must_change)
+
+        user = SospUser(
+            user_id=user_id,
+            role=role,
+            agency_id=agency_id,
+            unit_id=unit_id,
+            cpf=payload.get("cpf", ""),
+            full_name=payload.get("name", ""),
+            email=payload.get("email", ""),
+            is_active=True,
+            must_change_password=initial_must_change,
+        )
+
+        # 1. Estabelece contexto RLS com falha segura no backend persistente.
+        from common.security.db_context import set_db_security_context, clear_db_security_context
+        orm_mode = getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm"
+        try:
+            context_ready = set_db_security_context(user=user)
+            if orm_mode and not context_ready:
+                raise AuthenticationFailed("Não foi possível validar o contexto de segurança.")
+        except AuthenticationFailed:
+            clear_db_security_context()
+            raise
+        except Exception as e:
+            if orm_mode:
+                logger.error("Falha ao definir contexto RLS no autenticador: %s", e)
+                clear_db_security_context()
+                raise AuthenticationFailed("Não foi possível validar o contexto de segurança.")
+            logger.warning("Contexto de banco indisponível no modo de demonstração: %s", e)
+
+        # 2. Verifica revogação de sessão no servidor (accountsSession / revogação ativa sob RLS)
+        try:
+            from apps.accounts.repositories import citizen_repository
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            if citizen_repository.is_session_revoked(token_hash):
+                try:
+                    from common.security.db_context import clear_db_security_context
+                    clear_db_security_context()
+                except Exception:
+                    pass
+                raise AuthenticationFailed("Sessão revogada ou inválida no servidor. Faça login novamente.")
+        except AuthenticationFailed:
+            raise
+        except Exception as e:
+            if getattr(settings, "REPOSITORY_BACKEND", "memory") == "orm":
+                logger.error("Falha ao verificar revogação de sessão no banco (Fail-Closed): %s", e)
+                try:
+                    from common.security.db_context import clear_db_security_context
+                    clear_db_security_context()
+                except Exception:
+                    pass
+                raise AuthenticationFailed("Falha de segurança ao validar sessão no servidor.")
+            logger.debug("Verificação de revogação de sessão ignorada em modo não-ORM: %s", e)
+
+        # 3. Revalidação autoritativa a cada requisição: não confiar em claims
+        # antigas de perfil/órgão/unidade contidas em JWT ainda não expirado.
+        def canonical_role(value):
+            if value in ("servant", "server", "servidor"):
+                return "server"
+            if value in ("gestor", "manager"):
+                return "gestor"
+            if value in ("citizen", "cidadao"):
+                return "citizen"
+            if value in ("admin", "superadmin", "administrator", "administrador"):
+                return "admin"
+            return value
+
+        try:
+            if orm_mode:
+                from apps.accounts.models import Citizen, InternalUser
+
+                token_role = canonical_role(role)
+                if token_role == "citizen":
+                    current = Citizen.objects.filter(
+                        id=user_id, is_active=True, deleted_at__isnull=True
+                    ).values("id").first()
+                    if not current:
+                        raise AuthenticationFailed("Conta desativada, excluída ou inexistente.")
+                elif token_role in ("server", "gestor", "admin", "superadmin"):
+                    current = InternalUser.objects.filter(id=user_id).values(
+                        "role", "agency_id", "unit_id", "is_active", "deleted_at", "must_change_password"
+                    ).first()
+                    if not current or not current["is_active"] or current["deleted_at"] is not None:
+                        raise AuthenticationFailed("Conta institucional desativada, excluída ou inexistente.")
+
+                    raw_must_change = current.get("must_change_password")
+                    authoritative_must_change = True if raw_must_change is None else bool(raw_must_change)
+                    user.must_change_password = authoritative_must_change
+
+                    # Anti-bypass: se o token afirma false mas o banco autoritativo exige troca, rejeita imediatamente
+                    if payload.get("must_change_password") is False and authoritative_must_change:
+                        raise AuthenticationFailed(
+                            "Token inválido: tentativa de bypass de primeiro acesso. Troca de senha obrigatória pendente."
+                        )
+
+                    if (
+                        canonical_role(current["role"]) != token_role
+                        or str(current["agency_id"] or "") != str(agency_id or "")
+                        or str(current["unit_id"] or "") != str(unit_id or "")
+                    ):
+                        raise AuthenticationFailed(
+                            "Permissões institucionais alteradas. Faça login novamente."
+                        )
+                else:
+                    raise AuthenticationFailed("Perfil de autenticação inválido.")
+            else:
+                from apps.accounts.repositories import citizen_repository
+                token_role = canonical_role(role)
+                subject = citizen_repository.get_internal_user_by_id(str(user_id)) if token_role in ("server", "gestor", "admin", "superadmin") else citizen_repository.get_by_id(str(user_id))
+                if subject:
+                    if not subject.get("isActive", True) or subject.get("deletedAt"):
+                        raise AuthenticationFailed("Conta desativada ou excluída.")
+                    if token_role in ("server", "gestor", "admin", "superadmin"):
+                        raw_must_change = subject.get("mustChangePassword")
+                        authoritative_must_change = True if raw_must_change is None else bool(raw_must_change)
+                        user.must_change_password = authoritative_must_change
+                        if payload.get("must_change_password") is False and authoritative_must_change:
+                            raise AuthenticationFailed(
+                                "Token inválido: tentativa de bypass de primeiro acesso. Troca de senha obrigatória pendente."
+                            )
+                        if (
+                            canonical_role(subject.get("role", "")) != token_role
+                            or str(subject.get("agencyId") or "") != str(agency_id or "")
+                            or str(subject.get("unitId") or "") != str(unit_id or "")
+                        ):
+                            raise AuthenticationFailed("Permissões institucionais alteradas. Faça login novamente.")
+        except AuthenticationFailed:
+            clear_db_security_context()
+            raise
+        except Exception as e:
+            if orm_mode:
+                logger.error("Falha na revalidação autoritativa de identidade: %s", e)
+                clear_db_security_context()
+                raise AuthenticationFailed("Falha de segurança ao validar a identidade no servidor.")
+            logger.debug("Revalidação indisponível no modo de demonstração: %s", e)
+
+        return (user, token)

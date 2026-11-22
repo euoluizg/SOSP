@@ -1,0 +1,201 @@
+"""Fixtures compartilhadas dos testes do backend SOSP.
+
+O backend opera com política deny-by-default (REST_FRAMEWORK.DEFAULT_PERMISSION_CLASSES
+= IsAuthenticated). Endpoints protegidos só podem ser exercitados com um token válido,
+por isso os testes usam fixtures autenticadas para os diferentes perfis RBAC do SOSP:
+- `auth_client`: cidadão seed (citizen-001) autenticado via endpoint real /auth/login
+- `citizen_client_b`: cidadão B (citizen-002) para validações de ownership entre cidadãos
+- `server_client`: servidor lotado na unidade-centro
+- `server_other_unit_client`: servidor lotado na unidade-farol
+- `admin_client`: administrador do sistema
+"""
+
+import pytest
+from rest_framework.test import APIClient
+from common.security.authentication import generate_sosp_token
+from apps.accounts.repositories import get_demo_password
+from apps.scheduling.repositories import scheduling_repository
+
+CITIZEN_SEED_CPF = "11144477705"
+CITIZEN_SEED_PASSWORD = get_demo_password()
+
+
+@pytest.fixture(autouse=True)
+def seed_scheduling_test_data():
+    """Garante que testes que exercitam agendamentos disponham de fixtures controladas sob demanda."""
+    if hasattr(scheduling_repository, "seed_test_fixtures"):
+        scheduling_repository.seed_test_fixtures()
+    yield
+    if hasattr(scheduling_repository, "_appointments"):
+        scheduling_repository._appointments.clear()
+
+
+@pytest.fixture
+def api_client():
+    """Cliente DRF anônimo (sem credenciais)."""
+    return APIClient()
+
+
+@pytest.fixture
+def auth_client(api_client):
+    """Cliente DRF autenticado com token Bearer emitido pelo endpoint de login (cidadão seed citizen-001)."""
+    response = api_client.post(
+        "/api/v1/auth/login",
+        {"cpf": CITIZEN_SEED_CPF, "password": CITIZEN_SEED_PASSWORD},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    token = response.json()["token"]
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield api_client
+    api_client.credentials()
+
+
+@pytest.fixture
+def citizen_client_b():
+    """Cliente DRF autenticado como outro cidadão (citizen-002) para testes de ownership."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="citizen-002",
+        role="citizen",
+        cpf="22233344455",
+        full_name="Cidadão B",
+        email="cidadao.b@exemplo.com.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_client():
+    """Cliente DRF autenticado como servidor da unidade-centro e órgão SSP."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-001",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id="unidade-centro",
+        full_name="Servidor Centro",
+        email="servidor.centro@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_other_unit_client():
+    """Cliente DRF autenticado como servidor de outra unidade (unidade-farol / DETRAN)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-002",
+        role="server",
+        agency_id="orgao-detran",
+        unit_id="unidade-farol",
+        full_name="Servidor Farol",
+        email="servidor.farol@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_ssp_tabuleiro_client():
+    """Cliente DRF autenticado como servidor da unidade-tabuleiro do MESMO órgão SSP."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-003",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id="unidade-tabuleiro",
+        full_name="Servidor Tabuleiro SSP",
+        email="servidor.tabuleiro@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def manager_ssp_client():
+    """Cliente DRF autenticado como gestor institucional do órgão SSP (sem unidade específica)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="manager-001",
+        role="gestor",
+        agency_id="orgao-ssp",
+        unit_id=None,
+        full_name="Gestor Institucional SSP",
+        email="gestor.ssp@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_without_scope_client():
+    """Cliente DRF autenticado como servidor sem nenhum escopo organizacional (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-no-scope",
+        role="server",
+        agency_id=None,
+        unit_id=None,
+        full_name="Servidor Sem Escopo",
+        email="server.noscope@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def server_without_unit_client():
+    """Cliente DRF autenticado como servidor com órgão mas sem unidade (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="server-no-unit",
+        role="server",
+        agency_id="orgao-ssp",
+        unit_id=None,
+        full_name="Servidor Sem Unidade",
+        email="server.nounit@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def manager_without_agency_client():
+    """Cliente DRF autenticado como gestor sem órgão atribuído (fail-closed)."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="manager-no-agency",
+        role="gestor",
+        agency_id=None,
+        unit_id=None,
+        full_name="Gestor Sem Órgão",
+        email="manager.noagency@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()
+
+
+@pytest.fixture
+def admin_client():
+    """Cliente DRF autenticado como administrador do sistema."""
+    client = APIClient()
+    token = generate_sosp_token(
+        user_id="admin-001",
+        role="admin",
+        full_name="Administrador SOSP",
+        email="admin@sosp.al.gov.br",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    yield client
+    client.credentials()

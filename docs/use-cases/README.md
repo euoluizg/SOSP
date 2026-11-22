@@ -2,7 +2,7 @@
 
 > **Projeto:** SOSP — Sistema de Orientação para Serviços Públicos
 > **Versão:** 1.1.0 · **Data:** 31/10/2026 · **Status:** Em revisão
-> **Autores:** Equipe de Engenharia de Software — CESMAC
+> **Autores:** Arthur Franco e Luiz Gustavo — CESMAC
 > **Documentos irmãos:** [Pilar 1](../01-product-specs.md) · [Pilar 2](../02-design-ux.md) · [Pilar 3](../03-architecture.md) · [Pilar 4](../04-data-api.md) · [Pilar 5](../05-engineering-devops.md)
 
 ---
@@ -457,7 +457,7 @@ flowchart LR
 |---|---|---|
 | A1 | Serviço sem unidade presencial | Exibe apenas o canal online e o link externo |
 | A2 | Múltiplas unidades | Lista todas, com endereço, horário e acessibilidade; o mapa mostra a selecionada |
-| A3 | Cidadão não autenticado escolhe Agendar | Redireciona ao Gov.br e retorna à ficha com a intenção preservada (D6) |
+| A3 | Cidadão não autenticado escolhe Agendar | Redireciona à tela de login local (CPF + senha) e retorna à ficha com a intenção preservada (D6) |
 | A4 | Serviço com avaliações habilitadas | Exibe média e contagem somente com a flag do RF-10 ligada (RN-11) |
 
 **Exceções**

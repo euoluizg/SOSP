@@ -1,0 +1,423 @@
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from common.security.permissions import HasChangedTemporaryPassword, IsInstitutionalUser, IsServerUser
+from .serializers import (
+    CreateAppointmentSerializer,
+    CancelAppointmentSerializer,
+    UpdateAppointmentStatusSerializer,
+)
+from .services import SchedulingService
+from .repositories import scheduling_repository
+from common.exceptions import ProblemDetailsException
+
+
+def check_appointment_access(request_user, appt) -> None:
+    """
+    Valida autorização de acesso ao agendamento (ownership e RBAC — ADR-003, RS-01 a RS-03, RN-36):
+    - Cidadão: apenas o proprietário (appt['citizenId'] == user.id). Se não for, 404 (anti-enumeração / STRIDE).
+    - Servidor operacional (com unidade de lotação): acesso restrito ESTRITAMENTE à sua unidade (RN-36).
+      Pertencer ao mesmo órgão NÃO autoriza acesso a outras unidades. Se não for de sua unidade, 403.
+    - Gestor institucional (com órgão e sem unidade específica): restrito ao órgão (RN-36). Se não for de seu órgão, 403.
+    - Administrador: acesso irrestrito.
+    """
+    user_role = getattr(request_user, "role", "citizen")
+    user_id = str(request_user.id)
+
+    if user_role in ("citizen", "cidadao"):
+        if str(appt.get("citizenId")) != user_id:
+            raise ProblemDetailsException(
+                detail="Agendamento não encontrado.",
+                status_code=404,
+                title="Recurso não encontrado",
+            )
+        return
+
+    if user_role in ("server", "servant", "servidor", "gestor", "manager"):
+        server_unit = str(getattr(request_user, "unit_id", "") or "")
+        server_agency = str(getattr(request_user, "agency_id", "") or "")
+        appt_unit = str(appt.get("unitId") or "")
+        appt_agency = str(appt.get("agencyId") or "")
+
+        # FAIL-CLOSED Gestor institucional: opera estritamente no nível do seu órgão (RN-36, ADR-003)
+        if user_role in ("gestor", "manager"):
+            if not server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            if not appt_agency or appt_agency != server_agency:
+                raise ProblemDetailsException(
+                    detail="Gestor institucional não possui permissão para acessar recursos fora do seu órgão de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            return
+
+        # FAIL-CLOSED: Servidor operacional sem nenhum escopo organizacional válido é sumariamente bloqueado (403)
+        if not server_unit and not server_agency:
+            raise ProblemDetailsException(
+                detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
+                status_code=403,
+                title="Acesso não autorizado",
+            )
+
+        # Servidor operacional (com unidade de lotação): acesso ESTRITAMENTE restrito à sua unidade (RN-36)
+        # Pertencer ao mesmo órgão NÃO concede acesso a outras unidades.
+        if server_unit:
+            if not appt_unit or appt_unit != server_unit:
+                raise ProblemDetailsException(
+                    detail="Servidor não possui permissão para acessar agendamentos de outra unidade, mesmo que do mesmo órgão (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            return
+
+        # Servidor operacional sem unidade de lotação atribuída: fail-closed!
+        raise ProblemDetailsException(
+            detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+            status_code=403,
+            title="Acesso não autorizado",
+        )
+
+    if user_role in ("admin", "administrator", "superadmin", "administrador"):
+        return
+
+    raise ProblemDetailsException(
+        detail="Acesso não autorizado ao recurso.",
+        status_code=403,
+        title="Acesso não autorizado",
+    )
+
+
+class UnitSlotsView(APIView):
+    """Retorna slots de 30 minutos disponíveis para uma unidade e data (RN-18)."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, unit_id):
+        date_str = request.query_params.get("date")
+        if not date_str:
+            raise ProblemDetailsException(
+                detail="O parâmetro 'date' (AAAA-MM-DD) é obrigatório.", status_code=400
+            )
+        slots = SchedulingService.get_slots_for_unit(unit_id, date_str)
+        return Response(slots, status=status.HTTP_200_OK)
+
+
+class InstitutionalAppointmentsListView(APIView):
+    """Lista agendamentos operacionais com escopo estrito de unidade/órgão (RN-36, ADR-003)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsInstitutionalUser]
+
+    def get(self, request):
+        user = request.user
+        user_role = getattr(user, "role", "citizen")
+        status_filter = request.query_params.get("status")
+        date_filter = request.query_params.get("date")
+
+        if user_role in ("server", "servant", "servidor", "gestor", "manager"):
+            server_unit = str(getattr(user, "unit_id", "") or "")
+            server_agency = str(getattr(user, "agency_id", "") or "")
+
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
+            all_appts = scheduling_repository.list_all()
+            if user_role in ("gestor", "manager"):
+                if not server_agency:
+                    raise ProblemDetailsException(
+                        detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                        status_code=403,
+                        title="Acesso não autorizado",
+                    )
+                appts = [a for a in all_appts if str(a.get("agencyId") or "") == server_agency]
+            elif server_unit:
+                appts = [a for a in all_appts if str(a.get("unitId") or "") == server_unit]
+            else:
+                raise ProblemDetailsException(
+                    detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+        elif user_role in ("admin", "administrator", "superadmin", "administrador"):
+            appts = scheduling_repository.list_all()
+        else:
+            raise ProblemDetailsException(
+                detail="Acesso não autorizado.",
+                status_code=403,
+                title="Acesso não autorizado",
+            )
+
+        if status_filter and status_filter != "all":
+            appts = [a for a in appts if a.get("status") == status_filter]
+        if date_filter:
+            appts = [a for a in appts if a.get("scheduledDate") == date_filter]
+
+        return Response(appts, status=status.HTTP_200_OK)
+
+
+class AppointmentCreateListView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def post(self, request):
+        idempotency_key = request.headers.get("Idempotency-Key") or request.META.get(
+            "HTTP_IDEMPOTENCY_KEY"
+        )
+        if not idempotency_key:
+            raise ProblemDetailsException(
+                detail="O cabeçalho 'Idempotency-Key' é obrigatório para criação de agendamento.",
+                title="Cabeçalho Ausente",
+                status_code=400,
+            )
+
+        serializer = CreateAppointmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if request.user and getattr(request.user, "is_authenticated", False):
+            # Cidadão autenticado: a identidade DEVE ser a do próprio usuário (anti-spoofing)
+            if getattr(request.user, "role", "citizen") in ("citizen", "cidadao"):
+                citizen_id = str(request.user.id)
+            else:
+                # Servidor ou admin agendando para terceiro: usa citizenId do payload
+                citizen_id = str(data.get("citizenId") or request.user.id)
+        else:
+            citizen_id = data.get("citizenId", "citizen-001")
+
+        appt = SchedulingService.create_appointment(
+            citizen_id=citizen_id,
+            service_id=data["serviceId"],
+            unit_id=data["unitId"],
+            scheduled_date=data["scheduledDate"],
+            scheduled_time=data["scheduledTime"],
+        )
+        return Response(appt, status=status.HTTP_201_CREATED)
+
+
+class AppointmentDetailView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def get(self, request, appointment_id):
+        appt = scheduling_repository.get_by_id(appointment_id)
+        if not appt:
+            raise ProblemDetailsException(detail="Agendamento não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+        return Response(appt, status=status.HTTP_200_OK)
+
+
+class AppointmentCancelView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def post(self, request, appointment_id):
+        appt = scheduling_repository.get_by_id(appointment_id)
+        if not appt:
+            raise ProblemDetailsException(detail="Agendamento não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+
+        serializer = CancelAppointmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data.get("reason")
+        result = SchedulingService.cancel_appointment(appointment_id, reason)
+        return Response(result, status=status.HTTP_200_OK)
+
+    def patch(self, request, appointment_id):
+        return self.post(request, appointment_id)
+
+
+class AppointmentStatusUpdateView(APIView):
+    """Atualiza status operacional de um agendamento (Chamar, Concluir, Ausente, Cancelar — RF-08/RF-09)."""
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword, IsInstitutionalUser]
+
+    def patch(self, request, appointment_id):
+        appt = scheduling_repository.get_by_id(appointment_id)
+        if not appt:
+            raise ProblemDetailsException(detail="Agendamento não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+
+        serializer = UpdateAppointmentStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = SchedulingService.update_appointment_status(
+            appointment_id=appointment_id,
+            new_status=serializer.validated_data["status"],
+            user=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+        return Response(updated, status=status.HTTP_200_OK)
+
+    def post(self, request, appointment_id):
+        return self.patch(request, appointment_id)
+
+
+class AppointmentByProtocolView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def get(self, request, protocol_number):
+        appt = scheduling_repository.get_by_protocol(protocol_number)
+        if not appt:
+            raise ProblemDetailsException(detail="Protocolo não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+        return Response(appt, status=status.HTTP_200_OK)
+
+
+class CitizenAppointmentsView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def get(self, request, citizen_id):
+        user_role = getattr(request.user, "role", "citizen")
+        user_id = str(request.user.id)
+
+        # Cidadão só pode listar os próprios agendamentos (RS-01, STRIDE)
+        if user_role in ("citizen", "cidadao"):
+            if user_id != str(citizen_id):
+                raise ProblemDetailsException(
+                    detail="Cidadão não encontrado ou você não possui permissão para consultar estes agendamentos.",
+                    status_code=404,
+                    title="Recurso não encontrado",
+                )
+            appts = scheduling_repository.list_by_citizen(citizen_id)
+            return Response(appts, status=status.HTTP_200_OK)
+
+        # Servidor ou Gestor lista agendamentos da sua unidade ou órgão (RN-36)
+        if user_role in ("server", "servant", "servidor", "gestor", "manager"):
+            server_unit = str(getattr(request.user, "unit_id", "") or "")
+            server_agency = str(getattr(request.user, "agency_id", "") or "")
+
+            # FAIL-CLOSED: Sem escopo organizacional, bloqueia
+            if not server_unit and not server_agency:
+                raise ProblemDetailsException(
+                    detail="Servidor sem escopo organizacional válido de lotação (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+
+            appts = scheduling_repository.list_by_citizen(citizen_id)
+            if user_role in ("gestor", "manager"):
+                if not server_agency:
+                    raise ProblemDetailsException(
+                        detail="Gestor institucional sem órgão de lotação configurado (RN-36).",
+                        status_code=403,
+                        title="Acesso não autorizado",
+                    )
+                filtered = [a for a in appts if str(a.get("agencyId") or "") == server_agency]
+            elif server_unit:
+                filtered = [a for a in appts if str(a.get("unitId") or "") == server_unit]
+            else:
+                # Servidor operacional sem unidade
+                raise ProblemDetailsException(
+                    detail="Servidor operacional sem unidade de atendimento atribuída (RN-36).",
+                    status_code=403,
+                    title="Acesso não autorizado",
+                )
+            return Response(filtered, status=status.HTTP_200_OK)
+
+        # Administrador: acesso irrestrito
+        if user_role in ("admin", "administrator", "superadmin", "administrador"):
+            appts = scheduling_repository.list_by_citizen(citizen_id)
+            return Response(appts, status=status.HTTP_200_OK)
+
+        raise ProblemDetailsException(
+            detail="Acesso não autorizado.",
+            status_code=403,
+            title="Acesso não autorizado",
+        )
+
+
+class ProtocolTimelineView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def get(self, request, protocol_number):
+        appt = scheduling_repository.get_by_protocol(protocol_number)
+        if not appt:
+            raise ProblemDetailsException(detail="Protocolo não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+        timeline = SchedulingService.get_protocol_timeline(protocol_number)
+        return Response(timeline, status=status.HTTP_200_OK)
+
+
+class ProtocolDirectView(APIView):
+    """
+    Bloqueia chamadas diretas a /protocols/{protocolNumber} retornando 405 Method Not Allowed.
+    O endpoint de consulta oficial é /appointments/by-protocol/{protocol} ou /protocols/{protocolNumber}/timeline.
+    """
+
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def get(self, request, protocol_number):
+        raise ProblemDetailsException(
+            detail="A rota /protocols/{protocolNumber} não permite o método GET diretamente. O endpoint de consulta é /appointments/by-protocol/{protocol} ou /protocols/{protocolNumber}/timeline.",
+            status_code=405,
+            title="Método não permitido",
+            type_uri="https://sosp.al.gov.br/errors/405",
+            headers={"Allow": "OPTIONS"},
+        )
+
+    def post(self, request, protocol_number):
+        return self.get(request, protocol_number)
+
+    def put(self, request, protocol_number):
+        return self.get(request, protocol_number)
+
+    def delete(self, request, protocol_number):
+        return self.get(request, protocol_number)
+
+
+class ProtocolDocumentsUploadView(APIView):
+    permission_classes = [IsAuthenticated, HasChangedTemporaryPassword]
+
+    def post(self, request, protocol_number):
+        appt = scheduling_repository.get_by_protocol(protocol_number)
+        if not appt:
+            raise ProblemDetailsException(detail="Protocolo não encontrado.", status_code=404)
+        check_appointment_access(request.user, appt)
+
+        files = request.FILES.getlist("file") or request.FILES.getlist("files")
+        if not files:
+            uploaded_name = request.data.get("fileName", "documento.pdf")
+            size_mb = float(request.data.get("sizeMb", 1.5))
+            file_size_bytes = int(request.data.get("fileSize") or round(size_mb * 1024 * 1024))
+            mime_type = request.data.get("mimeType") or "application/pdf"
+        else:
+            f = files[0]
+            uploaded_name = f.name
+            file_size_bytes = int(f.size)
+            size_mb = f.size / (1024 * 1024)
+            mime_type = getattr(f, "content_type", None) or "application/pdf"
+
+        allowed_exts = (".pdf", ".jpg", ".jpeg", ".png")
+        if not str(uploaded_name).lower().endswith(allowed_exts):
+            raise ProblemDetailsException(
+                detail="Formato inválido. Permitido apenas PDF, JPG e PNG (RS-04).",
+                title="Formato não permitido",
+                status_code=400,
+            )
+
+        if size_mb > 10.0:
+            raise ProblemDetailsException(
+                detail="O arquivo excede o limite máximo permitido de 10 MB (RS-04).",
+                title="Arquivo muito grande",
+                status_code=400,
+            )
+
+        import datetime as _dt
+        import uuid as _uuid
+        doc_record = {
+            "id": str(_uuid.uuid4()),
+            "protocolNumber": protocol_number,
+            "fileName": uploaded_name,
+            "fileSize": max(1024, file_size_bytes),
+            "sizeMb": round(size_mb, 2),
+            "mimeType": mime_type,
+            "s3Key": f"attachments/{protocol_number}/{uploaded_name}",
+            "uploadedAt": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "url": f"/api/v1/protocols/{protocol_number}/documents",
+        }
+        scheduling_repository.add_attachment(protocol_number, doc_record)
+        return Response(doc_record, status=status.HTTP_201_CREATED)
