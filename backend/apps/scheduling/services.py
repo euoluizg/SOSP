@@ -79,8 +79,8 @@ class SchedulingService:
         before_state = dict(appt)
         normalized = "confirmed" if new_status == "in_progress" else ("no_show" if new_status == "noShow" else new_status)
         appt["status"] = normalized
-        if normalized == "cancelled" and note:
-            appt["cancelReason"] = note
+        if normalized == "cancelled":
+            appt["cancelReason"] = note or appt.get("cancelReason") or "Cancelado pelo atendente"
         appt["_actorId"] = str(getattr(user, "id", "") or "")
         appt["_actorType"] = "servant"
         appt["_transitionNote"] = note or f"Status alterado para '{normalized}' pelo atendente."
