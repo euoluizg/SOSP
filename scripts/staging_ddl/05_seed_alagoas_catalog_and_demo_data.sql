@@ -356,17 +356,18 @@ $$;
 
 -- ------------------------------------------------------------------------------
 -- 5. Sinônimos Oficiais de Busca Semântica (searchSynonym — Demo "tirar rg")
+-- Nota: literais '{"a","b"}' funcionam tanto em coluna text quanto text[]/varchar[]
 -- ------------------------------------------------------------------------------
 INSERT INTO public.searchSynonym (term, synonyms, isActive) VALUES
-  ('tirar rg',   ARRAY['identidade', 'cin', 'carteira de identidade', 'rg'], true),
-  ('rg',         ARRAY['identidade', 'cin', 'carteira de identidade'], true),
-  ('identidade', ARRAY['rg', 'cin', 'carteira de identidade'], true),
-  ('cnh',        ARRAY['carteira nacional de habilitacao', 'habilitacao', 'renovacao', 'detran'], true),
-  ('iptu',       ARRAY['tributos', 'certidao', 'sefaz', 'debitos'], true),
-  ('certidao',   ARRAY['sefaz', 'debitos', 'negativa', 'identidade'], true),
-  ('cadunico',   ARRAY['cadastro unico', 'bolsa familia', 'assistencia social'], true),
-  ('sus',        ARRAY['cartao sus', 'saude', 'sesau'], true),
-  ('agua',       ARRAY['casal', 'fatura', 'segunda via', 'saneamento'], true)
+  ('tirar rg',   '{"identidade","cin","carteira de identidade","rg"}', true),
+  ('rg',         '{"identidade","cin","carteira de identidade"}', true),
+  ('identidade', '{"rg","cin","carteira de identidade"}', true),
+  ('cnh',        '{"carteira nacional de habilitacao","habilitacao","renovacao","detran"}', true),
+  ('iptu',       '{"tributos","certidao","sefaz","debitos"}', true),
+  ('certidao',   '{"sefaz","debitos","negativa","identidade"}', true),
+  ('cadunico',   '{"cadastro unico","bolsa familia","assistencia social"}', true),
+  ('sus',        '{"cartao sus","saude","sesau"}', true),
+  ('agua',       '{"casal","fatura","segunda via","saneamento"}', true)
 ON CONFLICT (term) DO UPDATE
   SET synonyms = EXCLUDED.synonyms,
       isActive = true;
