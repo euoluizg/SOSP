@@ -183,14 +183,14 @@ BEGIN
         IF v_svc_cnh IS NULL THEN
             INSERT INTO public.catalogService (
                 name, category, detailedDescription, eligibility, prerequisites,
-                isFree, costAmount, averageDeadlineDays, channel, status
+                isFree, costAmount, averageDeadlineDays, channel, externalUrl, status
             ) VALUES (
                 'Renovação da Carteira Nacional de Habilitação (CNH)',
-                'transit',
+                'transport',
                 'Renovação periódica da Carteira Nacional de Habilitação (CNH) vencida ou a vencer nos próximos 30 dias, com emissão da versão digital (CDT) e física.',
                 'Condutores habilitados com registro ativo no DETRAN-AL.',
                 'CNH anterior legível e aprovação em exame de aptidão física e mental em clínica credenciada.',
-                false, 138.50, 5, 'hybrid', 'active'
+                false, 138.50, 5, 'hybrid', 'https://www.detran.al.gov.br', 'active'
             ) RETURNING id INTO v_svc_cnh;
         END IF;
 
@@ -316,14 +316,14 @@ BEGIN
         IF v_svc_casal IS NULL THEN
             INSERT INTO public.catalogService (
                 name, category, detailedDescription, eligibility, prerequisites,
-                isFree, costAmount, averageDeadlineDays, channel, status
+                isFree, costAmount, averageDeadlineDays, channel, externalUrl, status
             ) VALUES (
                 'Segunda Via de Fatura e Negociação CASAL',
-                'general',
+                'taxes',
                 'Emissão de 2ª via de conta de água/esgoto, atualização de titularidade e parcelamento de débitos junto à Companhia de Saneamento de Alagoas (CASAL).',
                 'Titulares ou moradores de imóveis atendidos pela CASAL.',
                 'Número de matrícula do imóvel ou CPF do titular.',
-                true, NULL, 1, 'hybrid', 'active'
+                true, NULL, 1, 'hybrid', 'https://www.casal.al.gov.br', 'active'
             ) RETURNING id INTO v_svc_casal;
         END IF;
 
@@ -378,19 +378,19 @@ ON CONFLICT (term) DO UPDATE
 INSERT INTO public.catalogFaq (question, answer, category, isActive)
 SELECT 'Como agendar um atendimento presencial no SOSP?',
        'Busque o serviço desejado no catálogo, consulte a ficha orientativa de 8 blocos, escolha a unidade de atendimento, a data e o slot de 30 minutos disponível. Ao confirmar, seu protocolo AAAAMMDD-XXXX será gerado imediatamente.',
-       'general', true
+       'documents', true
 WHERE NOT EXISTS (SELECT 1 FROM public.catalogFaq WHERE question = 'Como agendar um atendimento presencial no SOSP?');
 
 INSERT INTO public.catalogFaq (question, answer, category, isActive)
 SELECT 'Por que o botão Entrar com Gov.br abre uma mensagem de atualização?',
        'A integração federada OIDC com a conta Gov.br pertence à versão 2.0 (ADR-003). No MVP, cidadãos, servidores e administradores acessam com CPF e senha locais protegidos por Argon2id.',
-       'general', true
+       'documents', true
 WHERE NOT EXISTS (SELECT 1 FROM public.catalogFaq WHERE question = 'Por que o botão Entrar com Gov.br abre uma mensagem de atualização?');
 
 INSERT INTO public.catalogFaq (question, answer, category, isActive)
 SELECT 'Posso remarcar ou cancelar meu agendamento?',
        'Sim. Conforme a regra RN-22, o cancelamento pode ser feito diretamente na área Meus Agendamentos com antecedência mínima de 24 horas em relação ao horário reservado.',
-       'general', true
+       'documents', true
 WHERE NOT EXISTS (SELECT 1 FROM public.catalogFaq WHERE question = 'Posso remarcar ou cancelar meu agendamento?');
 
 INSERT INTO public.catalogFaq (question, answer, category, isActive)
