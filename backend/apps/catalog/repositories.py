@@ -17,6 +17,16 @@ CATEGORY_SLUG_TO_LABEL: Dict[str, str] = {
     "general": "Geral",
 }
 
+BASELINE_CATEGORY_SLUGS = {
+    "documents",
+    "health",
+    "education",
+    "transport",
+    "socialAssistance",
+    "taxes",
+    "work",
+}
+
 CATEGORY_LABEL_TO_SLUG: Dict[str, str] = {
     "documentos": "documents",
     "documentos pessoais": "documents",
@@ -26,28 +36,33 @@ CATEGORY_LABEL_TO_SLUG: Dict[str, str] = {
     "educacao": "education",
     "transporte": "transport",
     "transporte e mobilidade": "transport",
-    "trânsito": "transit",
-    "transito": "transit",
-    "trânsito e veículos": "transit",
+    "trânsito": "transport",
+    "transito": "transport",
+    "transit": "transport",
+    "trânsito e veículos": "transport",
     "assistência social": "socialAssistance",
     "assistencia social": "socialAssistance",
     "tributos": "taxes",
     "tributos e impostos": "taxes",
     "trabalho": "work",
-    "habitação": "housing",
-    "habitacao": "housing",
-    "meio ambiente": "environment",
-    "empresas": "business",
-    "geral": "general",
-    "cidadania e direitos": "general",
+    "habitação": "socialAssistance",
+    "habitacao": "socialAssistance",
+    "housing": "socialAssistance",
+    "meio ambiente": "documents",
+    "environment": "documents",
+    "empresas": "work",
+    "business": "work",
+    "geral": "documents",
+    "general": "documents",
+    "cidadania e direitos": "documents",
 }
 
 
 def normalize_category_slug(raw_category: str) -> str:
-    val = (raw_category or "general").strip()
-    if val in CATEGORY_SLUG_TO_LABEL:
+    val = (raw_category or "documents").strip()
+    if val in BASELINE_CATEGORY_SLUGS:
         return val
-    return CATEGORY_LABEL_TO_SLUG.get(val.lower(), "general")
+    return CATEGORY_LABEL_TO_SLUG.get(val.lower(), "documents")
 
 
 def category_slug_to_label(raw_category: str) -> str:
@@ -909,6 +924,11 @@ class CatalogDjangoORMRepository:
         cost_val = None if is_free else Decimal(str(round(float(data.get("costAmount") or 0), 2)))
         cat_slug = normalize_category_slug(data.get("category", "documents"))
 
+        channel = data.get("channel", "inPerson")
+        ext_url = (data.get("externalUrl") or "").strip() or None
+        if channel in ("online", "hybrid") and (not ext_url or not ext_url.startswith("https://")):
+            ext_url = "https://sosp.al.gov.br"
+
         with transaction.atomic():
             s = Service.objects.create(
                 name=data["name"].strip(),
@@ -919,8 +939,8 @@ class CatalogDjangoORMRepository:
                 is_free=is_free,
                 cost_amount=cost_val,
                 average_deadline_days=int(data.get("averageDeadlineDays", 5)),
-                channel=data.get("channel", "inPerson"),
-                external_url=(data.get("externalUrl") or "").strip() or None,
+                channel=channel,
+                external_url=ext_url,
                 status="active",
                 created_by_id=created_by_id if created_by_id and len(str(created_by_id)) == 36 else None,
             )
