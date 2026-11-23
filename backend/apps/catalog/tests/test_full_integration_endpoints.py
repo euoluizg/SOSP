@@ -197,3 +197,77 @@ def test_parse_synonyms_value_handles_postgres_text_and_lists():
     assert parse_synonyms_value("agua, casal, fatura") == ["agua", "casal", "fatura"]
     assert parse_synonyms_value(["sus", "saude"]) == ["sus", "saude"]
     assert parse_synonyms_value("") == []
+
+
+@pytest.mark.django_db
+def test_orm_appointment_save_survives_protocol_transition_rls_denial(monkeypatch):
+    from unittest.mock import patch
+    from apps.accounts.models import Citizen, Gender
+    from apps.catalog.models import Agency, Service, Unit
+    from apps.scheduling.models import Appointment, Protocol, ProtocolTransition
+    from apps.scheduling.repositories import SchedulingDjangoORMRepository
+
+    gender, _ = Gender.objects.get_or_create(name="Prefiro não informar", defaults={"sort_order": 4})
+    citizen = Citizen.objects.create(
+        cpf="52998224725",
+        full_name="Luiz Teste Agendamento",
+        birth_date="1998-05-10",
+        email="luiz.agendamento@exemplo.al.gov.br",
+        phone="82999887766",
+        password_hash="test_hash_value",
+        password_salt="salt",
+        gender=gender,
+        mother_name="Maria Teste",
+        zip_code="57020100",
+        street="Rua do Comércio",
+        neighborhood="Centro",
+        city="Maceió",
+        state="AL",
+        address_number="123",
+    )
+    agency = Agency.objects.create(name="SSP Teste", acronym="SSPT", sphere="state", is_active=True)
+    unit = Unit.objects.create(
+        agency=agency,
+        name="Central Já! Teste",
+        zip_code="57020100",
+        street="Rua do Comércio",
+        neighborhood="Centro",
+        city="Maceió",
+        state="AL",
+        address_number="123",
+        daily_limit=80,
+        is_active=True,
+    )
+    service = Service.objects.create(
+        name="CIN Teste RLS",
+        category="documents",
+        detailed_description="Teste de agendamento sob RLS",
+        eligibility="Todos",
+        is_free=True,
+        average_deadline_days=10,
+        channel="inPerson",
+        status="active",
+    )
+
+    repo = SchedulingDjangoORMRepository()
+    with patch.object(
+        ProtocolTransition.objects,
+        "create",
+        side_effect=PermissionError("new row violates row-level security policy for table schedulingprotocoltransition"),
+    ):
+        saved = repo.save(
+            {
+                "id": "appt-legacy-non-uuid",
+                "protocolNumber": "20261123-7777",
+                "citizenId": str(citizen.id),
+                "serviceId": str(service.id),
+                "unitId": str(unit.id),
+                "scheduledDate": "2026-12-03",
+                "scheduledTime": "14:00",
+                "status": "scheduled",
+            }
+        )
+
+    assert saved["protocolNumber"] == "20261123-7777"
+    assert Appointment.objects.filter(protocol_number="20261123-7777").exists()
+    assert Protocol.objects.filter(protocol_number="20261123-7777").exists()
