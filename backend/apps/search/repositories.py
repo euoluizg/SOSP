@@ -1,7 +1,38 @@
+import json
 import uuid
 import datetime
 from typing import Any, Dict, List, Optional
 from django.conf import settings
+
+
+def parse_synonyms_value(raw: Any) -> List[str]:
+    """Normaliza sinônimos vindos como lista, JSON ou literal text/array do PostgreSQL ('{\"a\",\"b\"}')."""
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except Exception:
+                pass
+        if text.startswith("{") and text.endswith("}"):
+            inner = text[1:-1].strip()
+            if not inner:
+                return []
+            return [
+                part.strip().strip('"').strip("'")
+                for part in inner.split(",")
+                if part.strip().strip('"').strip("'")
+            ]
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return []
 
 class SearchInMemoryRepository:
     def __init__(self):
@@ -56,7 +87,7 @@ class SearchDjangoORMRepository:
         from .models import Synonym
         try:
             syn = Synonym.objects.filter(term__iexact=term.strip(), is_active=True).first()
-            return list(syn.synonyms) if syn and syn.synonyms else []
+            return parse_synonyms_value(syn.synonyms) if syn else []
         except Exception:
             return []
 

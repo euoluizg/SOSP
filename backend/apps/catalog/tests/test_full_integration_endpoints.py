@@ -182,3 +182,18 @@ def test_internal_users_crud_rbac(api_client, admin_token, server_token):
     deact_resp = api_client.delete(f"/api/v1/internal-users/{created_id}")
     assert deact_resp.status_code == 200
     assert deact_resp.json()["isActive"] is False
+
+
+def test_parse_synonyms_value_handles_postgres_text_and_lists():
+    from apps.search.repositories import parse_synonyms_value
+
+    assert parse_synonyms_value('{"identidade","cin","carteira de identidade","rg"}') == [
+        "identidade",
+        "cin",
+        "carteira de identidade",
+        "rg",
+    ]
+    assert parse_synonyms_value('["cnh", "detran"]') == ["cnh", "detran"]
+    assert parse_synonyms_value("agua, casal, fatura") == ["agua", "casal", "fatura"]
+    assert parse_synonyms_value(["sus", "saude"]) == ["sus", "saude"]
+    assert parse_synonyms_value("") == []
