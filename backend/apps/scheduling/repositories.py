@@ -1,7 +1,10 @@
+import logging
 import uuid
 import datetime
 from typing import Any, Dict, List, Optional
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 class SchedulingInMemoryRepository:
     def __init__(self):
@@ -170,7 +173,7 @@ class SchedulingDjangoORMRepository:
         from .models import Appointment, Protocol, ProtocolTransition, Slot
         from apps.catalog.models import Service, Unit
         from apps.accounts.models import Citizen
-        from django.db import transaction
+        from django.db import IntegrityError, transaction
         from django.utils import timezone
         from common.exceptions import ProblemDetailsException
 
@@ -179,9 +182,10 @@ class SchedulingDjangoORMRepository:
             appt = None
             if appt_id:
                 try:
-                    appt = Appointment.objects.filter(id=appt_id).select_related("citizen", "service", "unit", "unit__agency").first()
-                except Exception:
-                    pass
+                    parsed_appt_uuid = uuid.UUID(str(appt_id))
+                    appt = Appointment.objects.filter(id=parsed_appt_uuid).select_related("citizen", "service", "unit", "unit__agency").first()
+                except (ValueError, TypeError):
+                    appt = None
 
             db_status = _API_TO_DB_STATUS.get(data.get("status", "scheduled"), "scheduled")
 
@@ -230,17 +234,28 @@ class SchedulingDjangoORMRepository:
                         booked_count=1,
                     )
 
-                appt = Appointment.objects.create(
-                    protocol_number=data["protocolNumber"],
-                    citizen=citizen,
-                    service=service,
-                    unit=unit,
-                    slot=slot,
-                    scheduled_date=slot_date,
-                    scheduled_time=slot_time,
-                    status=db_status,
-                    cancellation_reason=data.get("cancelReason"),
-                )
+                try:
+                    with transaction.atomic():
+                        appt = Appointment.objects.create(
+                            protocol_number=data["protocolNumber"],
+                            citizen=citizen,
+                            service=service,
+                            unit=unit,
+                            slot=slot,
+                            scheduled_date=slot_date,
+                            scheduled_time=slot_time,
+                            status=db_status,
+                            cancellation_reason=data.get("cancelReason"),
+                        )
+                except IntegrityError as exc:
+                    err_msg = str(exc).lower()
+                    if "uqschedulingappointmentactive" in err_msg or "citizenid" in err_msg:
+                        raise ProblemDetailsException(
+                            detail="Você já possui um agendamento ativo para este serviço.",
+                            title="Agendamento Duplicado",
+                            status_code=409,
+                        )
+                    raise
 
                 proto = Protocol.objects.create(
                     protocol_number=data["protocolNumber"],
@@ -249,18 +264,27 @@ class SchedulingDjangoORMRepository:
                     appointment=appt,
                     status="scheduled",
                 )
-                ProtocolTransition.objects.create(
-                    protocol=proto,
-                    from_status=None,
-                    to_status="scheduled",
-                    actor_type="citizen",
-                    actor_id=citizen.id if citizen else None,
-                    note="Agendamento presencial registrado no SOSP.",
-                )
+                # Savepoint isolado: sob RLS p_protocol_trans_insert apenas server/admin podem inserir
+                # em schedulingProtocolTransition, então falha de RLS aqui não pode abortar o agendamento do cidadão.
+                try:
+                    with transaction.atomic():
+                        ProtocolTransition.objects.create(
+                            protocol=proto,
+                            from_status=None,
+                            to_status="scheduled",
+                            actor_type="citizen",
+                            actor_id=citizen.id if citizen else None,
+                            note="Agendamento presencial registrado no SOSP.",
+                        )
+                except Exception as exc:
+                    logger.info("Transição inicial de protocolo ignorada sob RLS para cidadão: %s", exc)
             else:
                 prev_db_status = appt.status
                 appt.status = db_status
-                appt.cancellation_reason = data.get("cancelReason", appt.cancellation_reason)
+                if db_status == "cancelled":
+                    appt.cancellation_reason = data.get("cancelReason") or appt.cancellation_reason or "Cancelado pelo solicitante"
+                else:
+                    appt.cancellation_reason = data.get("cancelReason", appt.cancellation_reason)
                 appt.save()
 
                 if prev_db_status != db_status:
@@ -285,14 +309,18 @@ class SchedulingDjangoORMRepository:
                                 actor_uuid = uuid.UUID(str(actor_id))
                             except Exception:
                                 actor_uuid = None
-                        ProtocolTransition.objects.create(
-                            protocol=proto,
-                            from_status=old_p_status,
-                            to_status=new_p_status,
-                            actor_type=data.get("_actorType", "servant"),
-                            actor_id=actor_uuid,
-                            note=data.get("_transitionNote") or data.get("cancelReason") or f"Status atualizado para {db_status}.",
-                        )
+                        try:
+                            with transaction.atomic():
+                                ProtocolTransition.objects.create(
+                                    protocol=proto,
+                                    from_status=old_p_status,
+                                    to_status=new_p_status,
+                                    actor_type=data.get("_actorType", "servant"),
+                                    actor_id=actor_uuid,
+                                    note=data.get("_transitionNote") or data.get("cancelReason") or f"Status atualizado para {db_status}.",
+                                )
+                        except Exception as exc:
+                            logger.info("Transição de protocolo ignorada sob RLS: %s", exc)
 
             return self._to_dict(appt)
 
