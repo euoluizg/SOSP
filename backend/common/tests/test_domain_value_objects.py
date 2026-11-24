@@ -67,6 +67,20 @@ class TestDomainValueObjects(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProtocolCode("ABCDEFGH-1042")
 
+    def test_repositories_inherit_abstract_repository(self):
+        """Valida Herança formal e Abstração nos repositórios de contas e agendamentos."""
+        from common.repositories import AbstractRepository
+        from apps.accounts.repositories import CitizenDjangoORMRepository, CitizenInMemoryRepository
+        from apps.scheduling.repositories import SchedulingDjangoORMRepository, SchedulingInMemoryRepository
+
+        with self.assertRaises(TypeError):
+            AbstractRepository()
+
+        self.assertTrue(issubclass(CitizenInMemoryRepository, AbstractRepository))
+        self.assertTrue(issubclass(CitizenDjangoORMRepository, AbstractRepository))
+        self.assertTrue(issubclass(SchedulingInMemoryRepository, AbstractRepository))
+        self.assertTrue(issubclass(SchedulingDjangoORMRepository, AbstractRepository))
+
 
 if __name__ == "__main__":
     unittest.main()

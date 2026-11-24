@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from django.conf import settings
 from django.db import transaction
 from django.contrib.auth.hashers import make_password, check_password
+from common.domain.value_objects import CpfDocument, RegistrationNumber
 from common.exceptions import ProblemDetailsException
 from common.security.authentication import generate_sosp_token
 from .repositories import citizen_repository
@@ -14,30 +15,12 @@ from .repositories import citizen_repository
 logger = logging.getLogger(__name__)
 
 def validate_cpf(cpf: str) -> bool:
-    """Valida o formato e os dois dígitos verificadores do CPF."""
-    clean = "".join(filter(str.isdigit, cpf))
-    if len(clean) != 11:
+    """Valida o formato e os dois dígitos verificadores do CPF via Value Object CpfDocument."""
+    try:
+        CpfDocument(cpf)
+        return True
+    except ValueError:
         return False
-    if clean == clean[0] * 11:
-        return False
-
-    # 1º dígito verificador
-    s = sum(int(clean[i]) * (10 - i) for i in range(9))
-    r = (s * 10) % 11
-    if r in (10, 11):
-        r = 0
-    if r != int(clean[9]):
-        return False
-
-    # 2º dígito verificador
-    s = sum(int(clean[i]) * (11 - i) for i in range(10))
-    r = (s * 10) % 11
-    if r in (10, 11):
-        r = 0
-    if r != int(clean[10]):
-        return False
-
-    return True
 
 def validate_birth_date(birth_date_str: str) -> Tuple[bool, str]:
     """Valida data de nascimento e idade mínima de 12 anos (RF-01)."""
@@ -81,7 +64,9 @@ class AccountService:
     @staticmethod
     def register_citizen(data: Dict[str, Any]) -> Dict[str, Any]:
         cpf = data.get("cpf", "")
-        if not validate_cpf(cpf):
+        try:
+            cpf_doc = CpfDocument(cpf)
+        except ValueError:
             raise ProblemDetailsException(
                 detail="O CPF informado é inválido.",
                 title="CPF inválido",
@@ -89,7 +74,7 @@ class AccountService:
                 errors=[{"field": "cpf", "message": "O CPF informado é inválido."}],
             )
 
-        if citizen_repository.get_by_cpf(cpf):
+        if citizen_repository.get_by_cpf(cpf_doc.clean_value):
             raise ProblemDetailsException(
                 detail="Já existe uma conta cadastrada com este CPF.",
                 title="CPF já cadastrado",
@@ -120,7 +105,7 @@ class AccountService:
         # Hash Argon2id
         hashed_password = make_password(password)
 
-        clean_cpf = "".join(filter(str.isdigit, cpf))
+        clean_cpf = cpf_doc.clean_value
         gender_code = data.get("gender", "").strip()
         gender_desc = data.get("genderDescription", "").strip() if gender_code == "O" else ""
         citizen_data = {
@@ -160,8 +145,14 @@ class AccountService:
     def login_citizen(cpf: str, password: str) -> Dict[str, Any]:
         raw_identifier = (cpf or "").strip()
         clean_cpf = "".join(filter(str.isdigit, raw_identifier))
-        # Se for CPF de 11 dígitos, a chave de bloqueio é o CPF limpo. Se for matrícula, é a matrícula normalizada.
-        lock_key = clean_cpf if len(clean_cpf) == 11 and not any(c.isalpha() for c in raw_identifier) else raw_identifier.upper()
+        # Se for CPF de 11 dígitos, a chave de bloqueio é o CPF limpo. Se for matrícula, normaliza via RegistrationNumber.
+        if len(clean_cpf) == 11 and not any(c.isalpha() for c in raw_identifier):
+            lock_key = clean_cpf
+        else:
+            try:
+                lock_key = RegistrationNumber(raw_identifier).value
+            except ValueError:
+                lock_key = raw_identifier.upper()
 
         # Verifica bloqueio temporário (RN-29)
         is_locked, remaining = citizen_repository.is_locked_out(lock_key)
@@ -499,6 +490,16 @@ class AccountService:
             )
 
         payload = dict(data)
+        if payload.get("registrationNumber"):
+            try:
+                payload["registrationNumber"] = RegistrationNumber(str(payload["registrationNumber"])).value
+            except ValueError as exc:
+                raise ProblemDetailsException(
+                    detail=str(exc),
+                    title="Matrícula Inválida",
+                    status_code=400,
+                    errors=[{"field": "registrationNumber", "message": str(exc)}],
+                )
         payload["passwordHash"] = make_password(temp_password)
         created = citizen_repository.create_internal_user(payload)
 

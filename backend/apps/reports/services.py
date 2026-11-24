@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from apps.scheduling.selectors import get_all_appointments
 from common.feature_flags import FEATURE_REPORTS_EXPORT
 from common.exceptions import ProblemDetailsException
+from .exporters import get_report_exporter
 from .repositories import reports_repository
 
 class ReportsService:
@@ -101,11 +102,25 @@ class ReportsService:
             if scope_unit:
                 effective_filters["unitId"] = scope_unit
 
-        return reports_repository.create_export(
-            export_type=export_type,
+        exporter = get_report_exporter(export_type)
+        summary = ReportsService.get_appointments_summary(
+            start_date=effective_filters.get("startDate"),
+            end_date=effective_filters.get("endDate"),
+            agency_id=effective_filters.get("agencyId"),
+            unit_id=effective_filters.get("unitId"),
+        )
+        exported_bytes = exporter.export(summary)
+
+        record = reports_repository.create_export(
+            export_type=exporter.format_name,
             filters=effective_filters,
             requested_by=requested_by,
         )
+        enriched = dict(record)
+        enriched["contentType"] = exporter.content_type
+        enriched["fileName"] = exporter.build_filename()
+        enriched["byteSize"] = len(exported_bytes)
+        return enriched
 
     @staticmethod
     def get_export(export_id: str) -> Optional[Dict[str, Any]]:
