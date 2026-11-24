@@ -1,6 +1,7 @@
 import random
 import datetime
 from typing import Any, Dict, List, Optional
+from common.domain.value_objects import ProtocolCode
 from common.exceptions import ProblemDetailsException
 from apps.catalog.repositories import catalog_repository
 from .repositories import scheduling_repository
@@ -128,10 +129,10 @@ class SchedulingService:
                     status_code=409,
                 )
 
-        # Geração do protocolo no formato AAAAMMDD-XXXX (RN-20)
+        # Geração e validação encapsulada do protocolo no formato AAAAMMDD-XXXX (RN-20)
         today_str = datetime.date.today().strftime("%Y%m%d")
         random_suffix = f"{random.randint(1000, 9999)}"
-        protocol_number = f"{today_str}-{random_suffix}"
+        protocol_number = ProtocolCode(f"{today_str}-{random_suffix}").value
 
         appointment_id = f"appt-{int(datetime.datetime.now().timestamp() * 1000)}"
 
@@ -191,7 +192,12 @@ class SchedulingService:
     @staticmethod
     def get_protocol_timeline(protocol_number: str) -> Dict[str, Any]:
         """Retorna linha do tempo do protocolo de 4 etapas (RF-09)."""
-        appt = scheduling_repository.get_by_protocol(protocol_number)
+        try:
+            normalized_protocol = ProtocolCode(protocol_number).value
+        except ValueError:
+            normalized_protocol = (protocol_number or "").strip()
+
+        appt = scheduling_repository.get_by_protocol(normalized_protocol)
         if not appt:
             raise ProblemDetailsException(detail="Protocolo não encontrado.", status_code=404)
 
