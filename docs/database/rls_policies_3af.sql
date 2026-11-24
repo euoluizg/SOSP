@@ -200,7 +200,7 @@ BEGIN;
     ON searchSynonym
     FOR INSERT
     TO sosp_operador_role
-    WITH CHECK (cardinality(synonyms) > 0);
+    WITH CHECK (char_length(trim(synonyms)) > 0);
 
   DROP POLICY IF EXISTS p_operador_search_synonym_update ON searchSynonym;
   CREATE POLICY p_operador_search_synonym_update
@@ -208,7 +208,7 @@ BEGIN;
     FOR UPDATE
     TO sosp_operador_role
     USING (true)
-    WITH CHECK (cardinality(synonyms) > 0);
+    WITH CHECK (char_length(trim(synonyms)) > 0);
 
   -- ---------------------------------------------------------------------------
   -- 6. POLÍTICAS DE RLS: SLOTS DE AGENDAMENTO (schedulingSlot)

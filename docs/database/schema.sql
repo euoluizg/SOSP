@@ -201,6 +201,7 @@ BEGIN;
   CREATE INDEX IF NOT EXISTS idxAccountsInternalUserUnit ON accountsInternalUser (unitId);
 
   -- Função de autenticação cirúrgica de menor privilégio para usuários internos (sosp_security)
+  DROP FUNCTION IF EXISTS sosp_security.authenticate_internal_user_by_cpf(VARCHAR);
   CREATE OR REPLACE FUNCTION sosp_security.authenticate_internal_user_by_cpf(p_cpf VARCHAR)
   RETURNS TABLE (
       user_id UUID,
@@ -212,7 +213,8 @@ BEGIN;
       role VARCHAR,
       can_manage_catalog BOOLEAN,
       password_hash TEXT,
-      is_active BOOLEAN
+      is_active BOOLEAN,
+      must_change_password BOOLEAN
   )
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -234,7 +236,8 @@ BEGIN;
           u.role AS role,
           u.canManageCatalog AS can_manage_catalog,
           u.passwordHash::TEXT AS password_hash,
-          u.isActive AS is_active
+          u.isActive AS is_active,
+          u.mustChangePassword AS must_change_password
       FROM public.accountsInternalUser u
       WHERE u.cpf = p_cpf
         AND u.isActive = true
@@ -360,7 +363,7 @@ BEGIN;
   -- Adiciona FK de unidade em accountsInternalUser agora que catalogUnit existe
   DO $$
   BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fkAccountsInternalUserUnit') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fkaccountsinternaluserunit') THEN
       ALTER TABLE accountsInternalUser
         ADD CONSTRAINT fkAccountsInternalUserUnit FOREIGN KEY (unitId) REFERENCES catalogUnit (id) ON DELETE SET NULL;
     END IF;
@@ -634,11 +637,16 @@ BEGIN;
     createdAt      timestamptz NOT NULL DEFAULT now(),
     updatedAt      timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT uqSchedulingProtocolNumber UNIQUE (protocolNumber),
+    CONSTRAINT uqSchedulingProtocolAppointment UNIQUE (appointmentId),
     CONSTRAINT fkSchedulingProtCitizen FOREIGN KEY (citizenId) REFERENCES accountsCitizen (id),
     CONSTRAINT fkSchedulingProtAppt FOREIGN KEY (appointmentId) REFERENCES schedulingAppointment (id),
     CONSTRAINT chkSchedulingProtType CHECK (protocolType IN ('appointment', 'question')),
     CONSTRAINT chkSchedulingProtNumber CHECK (protocolNumber ~ '^[0-9]{8}-[0-9]{4}$'),
-    CONSTRAINT chkSchedulingProtStatus CHECK (status IN ('received', 'inReview', 'waitingDocument', 'scheduled', 'completed', 'cancelled'))
+    CONSTRAINT chkSchedulingProtStatus CHECK (status IN ('received', 'inReview', 'waitingDocument', 'scheduled', 'completed', 'cancelled')),
+    CONSTRAINT chkSchedulingProtLink CHECK (
+      (protocolType = 'appointment' AND appointmentId IS NOT NULL)
+      OR (protocolType = 'question' AND appointmentId IS NULL)
+    )
   );
 
   CREATE INDEX IF NOT EXISTS idxSchedulingProtocolCitizen ON schedulingProtocol (citizenId, openedAt DESC);

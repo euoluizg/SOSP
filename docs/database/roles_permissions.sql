@@ -146,7 +146,7 @@ BEGIN;
   --   O operador NUNCA possui acesso de escrita ou leitura em:
   --   - accountsCitizen (dados pessoais, CPF, endereço, senhas);
   --   - accountsInternalUser (senhas e matrículas de servidores);
-  --   - accountsCitizenSession e accountsLoginAttempt (sessões e auditoria);
+  --   - accountsSession e accountsLoginAttempt (sessões e auditoria);
   --   - auditEvent e auditDataSubjectRequest (trilha de auditoria imutável);
   --   - schedulingAppointment e schedulingProtocolAttachment (dados sigilosos de agendamentos).
   -- ---------------------------------------------------------------------------

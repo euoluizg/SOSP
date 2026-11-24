@@ -97,7 +97,7 @@ VALUES ('55555555-5555-5555-5555-555555555551', '33333333-3333-3333-3333-3333333
 
 -- 4. Insere Sinônimo de Busca ativo
 INSERT INTO searchSynonym (term, synonyms, isActive)
-VALUES ('sus', ARRAY['cartao do sus', 'saude publica'], true);
+VALUES ('sus', '{"cartao do sus","saude publica"}', true);
 
 -- 5. Insere Slot de Agendamento
 INSERT INTO schedulingSlot (id, unitId, slotDate, startsAt, endsAt, capacity, bookedCount)
