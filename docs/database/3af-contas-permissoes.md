@@ -117,7 +117,7 @@ A arquitetura adota a separação estrita entre **Papéis de Grupo (*Group Roles
 | `vw_catalogServiceSearch` | View | `SELECT` | `SELECT` *(herdado)* | Busca unificada com `security_invoker = true` |
 | `vw_schedulingSlotAvailability` | View | `SELECT` | `SELECT` *(herdado)* | Vagas disponíveis com `security_invoker = true` |
 | `accountsCitizen` | Tabela | **NEGADO** | **NEGADO** | Dados pessoais e LGPD (`RS-01`) |
-| `accountsCitizenSession`| Tabela | **NEGADO** | **NEGADO** | Sessões ativas do cidadão |
+| `accountsSession` | Tabela | **NEGADO** | **NEGADO** | Sessões ativas de cidadãos e usuários internos |
 | `accountsInternalUser` | Tabela | **NEGADO** | **NEGADO** | Credenciais administrativas de servidores |
 | `accountsPasswordReset` | Tabela | **NEGADO** | **NEGADO** | Tokens temporários de recuperação |
 | `schedulingAppointment`| Tabela | **NEGADO** | **NEGADO** | Agendamentos presenciais do cidadão |
