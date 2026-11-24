@@ -52,24 +52,25 @@ flowchart LR
 A camada autoral do SOSP implementa integralmente os **4 Pilares de POO**:
 
 1. **Abstração:**
-   - Classes base abstratas (`AbstractRepository` com `abc.ABC` e `@abstractmethod` em `backend/common/repositories.py`).
+   - Classes base abstratas (`AbstractRepository` com `abc.ABC` e `@abstractmethod` em `backend/common/repositories.py`; `ReportExporter` com `abc.ABC` e `@abstractmethod` em `backend/apps/reports/exporters.py`).
    - Protocolos tipados (`BaseRepository`) que definem contratos mínimos para persistência.
 
 2. **Encapsulamento:**
-   - Objetos de Valor (Value Objects) em `backend/common/domain/value_objects.py`:
-     - `CpfDocument`: valida dígitos verificadores, garante imutabilidade e expõe `@property clean_value`, `formatted` e `masked`.
-     - `RegistrationNumber`: encapsula matrículas de servidores (`202XXXXX`, `SSP-1001`), com validação e extração de prefixo.
-     - `ProtocolCode`: encapsula a lógica do formato oficial `AAAAMMDD-XXXX` (RN-20).
+   - Objetos de Valor (Value Objects) em `backend/common/domain/value_objects.py`, integrados nos fluxos de negócio em `backend/apps/accounts/services.py` e `backend/apps/scheduling/services.py`:
+     - `CpfDocument`: valida dígitos verificadores, garante imutabilidade e expõe `@property clean_value`, `formatted` e `masked` (usado no cadastro, validação de CPF e mascaramento LGPD).
+     - `RegistrationNumber`: encapsula matrículas de servidores (`202XXXXX`, `SSP-1001`), com validação e extração de prefixo (usado no login institucional e provisionamento de usuários internos).
+     - `ProtocolCode`: encapsula a lógica do formato oficial `AAAAMMDD-XXXX` (RN-20, usado na emissão e consulta de protocolos).
 
 3. **Herança:**
-   - Repositórios concretos (`CitizenInMemoryRepository`, `CitizenDjangoORMRepository`) herdam de `AbstractRepository`.
+   - Repositórios concretos (`CitizenInMemoryRepository`, `CitizenDjangoORMRepository`, `SchedulingInMemoryRepository`, `SchedulingDjangoORMRepository`) herdam formalmente de `AbstractRepository`.
+   - Exportadores concretos (`CsvExporter`, `PdfExporter` em `backend/apps/reports/exporters.py`) herdam de `ReportExporter`.
    - Models de banco herdam de `django.db.models.Model` e `CompositeKeyModel`.
    - Views de API herdam de `rest_framework.views.APIView`.
    - Classes de permissão de segurança herdam de `BasePermission`.
 
 4. **Polimorfismo:**
    - Desacoplamento transparente de persistência via `CitizenRepositoryProxy` e `SchedulingRepositoryProxy`: o sistema alterna dinamicamente entre repositórios em memória e repositórios ORM conforme a configuração de ambiente (`REPOSITORY_BACKEND`).
-   - Polimorfismo nos exportadores de relatórios (`CsvExporter`, `PdfExporter`).
+   - Polimorfismo nos exportadores de relatórios (`ReportExporter`, `CsvExporter`, `PdfExporter` e fábrica `get_report_exporter` em `backend/apps/reports/exporters.py`, consumidos por `ReportsService.create_export`).
 
 ---
 

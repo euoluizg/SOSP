@@ -3,10 +3,12 @@ import uuid
 import datetime
 from typing import Any, Dict, List, Optional
 from django.conf import settings
+from common.domain.value_objects import CpfDocument
+from common.repositories import AbstractRepository
 
 logger = logging.getLogger(__name__)
 
-class SchedulingInMemoryRepository:
+class SchedulingInMemoryRepository(AbstractRepository):
     def __init__(self):
         # Inicia estritamente vazio (Regra de Auditoria: zero agendamentos fictícios preexistentes)
         self._appointments: List[Dict[str, Any]] = []
@@ -69,7 +71,7 @@ class SchedulingInMemoryRepository:
     def list_by_citizen(self, citizen_id: str) -> List[Dict[str, Any]]:
         return [a for a in self._appointments if a["citizenId"] == citizen_id]
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self, **filters: Any) -> List[Dict[str, Any]]:
         return list(self._appointments)
 
     def save(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -128,7 +130,7 @@ _APPT_TO_PROTOCOL_STATUS = {
 }
 
 
-class SchedulingDjangoORMRepository:
+class SchedulingDjangoORMRepository(AbstractRepository):
     """Implementação real de persistência PostgreSQL via Django ORM com bloqueio transacional (ADR-001 / Etapa 3)."""
 
     def get_by_id(self, appointment_id: str) -> Optional[Dict[str, Any]]:
@@ -152,7 +154,7 @@ class SchedulingDjangoORMRepository:
         except Exception:
             return []
 
-    def list_all(self) -> List[Dict[str, Any]]:
+    def list_all(self, **filters: Any) -> List[Dict[str, Any]]:
         from .models import Appointment
         appts = Appointment.objects.all().select_related("citizen", "service", "unit", "unit__agency").order_by("-scheduled_date", "scheduled_time")
         return [self._to_dict(a) for a in appts]
@@ -377,7 +379,10 @@ class SchedulingDjangoORMRepository:
         service_name = a.service.name if getattr(a, "service", None) else "Serviço"
         citizen_name = a.citizen.full_name if getattr(a, "citizen", None) else "Cidadão"
         citizen_cpf = a.citizen.cpf if getattr(a, "citizen", None) else "00000000000"
-        masked_cpf = f"***.{citizen_cpf[3:6]}.{citizen_cpf[6:9]}-**" if len(citizen_cpf) == 11 else "***.***.***-**"
+        try:
+            masked_cpf = CpfDocument(citizen_cpf).masked
+        except ValueError:
+            masked_cpf = f"***.{citizen_cpf[3:6]}.{citizen_cpf[6:9]}-**" if len(citizen_cpf) == 11 else "***.***.***-**"
 
         return {
             "id": str(a.id),

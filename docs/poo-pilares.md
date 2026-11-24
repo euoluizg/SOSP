@@ -14,6 +14,8 @@ A Abstração permite definir contratos claros para o sistema sem amarrar a regr
     - `list_all(**filters: Any) -> List[Dict[str, Any]]`
     - `save(data: Dict[str, Any]) -> Dict[str, Any]`
   - `BaseRepository(Protocol)` estabelece o protocolo de tipagem estática (structural typing) em Python para compatibilidade desacoplada.
+- **Arquivo:** `backend/apps/reports/exporters.py`
+  - `ReportExporter(abc.ABC)` define o contrato abstrato formal (`format_name`, `content_type`, `file_extension` e `export(summary) -> bytes`) para estratégias de exportação de relatórios gerenciais (`RF-14`).
 
 ---
 
@@ -21,20 +23,20 @@ A Abstração permite definir contratos claros para o sistema sem amarrar a regr
 
 O Encapsulamento garante que dados críticos não sejam manipulados como strings ou dicionários soltos sem validação. Toda mutação e acesso a estados internos é controlado:
 
-- **Arquivo:** `backend/common/domain/value_objects.py`
+- **Arquivo:** `backend/common/domain/value_objects.py` *(integrado em `backend/apps/accounts/services.py`, `backend/apps/scheduling/services.py` e `backend/apps/scheduling/repositories.py`)*
   - **`CpfDocument`:**
     - Atributo privado `_digits`: mantém o estado interno encapsulado.
     - Validação de invariantes no construtor `__init__`: rejeita sequências inválidas e confere matematicamente os dois dígitos verificadores antes de instanciar o objeto.
     - Propriedades somente leitura (`@property`):
-      - `clean_value`: retorna os 11 dígitos numéricos limpos.
+      - `clean_value`: retorna os 11 dígitos numéricos limpos (usado em `AccountService.register_citizen` e `validate_cpf`).
       - `formatted`: formata no padrão `XXX.XXX.XXX-XX`.
-      - `masked`: mascara dados sensíveis conforme LGPD (`***.XXX.XXX-**`).
+      - `masked`: mascara dados sensíveis conforme LGPD (`***.XXX.XXX-**`, usado em `SchedulingDjangoORMRepository._to_dict`).
   - **`RegistrationNumber`:**
     - Encapsula a matrícula funcional de servidores (ex.: `202XXXXX`, `SSP-1001`).
-    - Atributo privado `_value`, validação por regex `^[A-Za-z0-9-]{4,20}$` e extração protegida de prefixo institucional via `@property prefix`.
+    - Atributo privado `_value`, validação por regex `^[A-Za-z0-9-]{4,20}$` e extração protegida de prefixo institucional via `@property prefix` (usado em `AccountService.login_citizen` e `AccountService.create_internal_user`).
   - **`ProtocolCode`:**
     - Encapsula o formato determinístico `AAAAMMDD-XXXX` (RN-20).
-    - Validação de data e extração de propriedades (`year`, `month`, `day`, `sequence_number`).
+    - Validação de data e extração de propriedades (`year`, `month`, `day`, `sequence_number`), usado em `SchedulingService.create_appointment` e `SchedulingService.get_protocol_timeline`.
 
 ---
 
@@ -43,9 +45,10 @@ O Encapsulamento garante que dados críticos não sejam manipulados como strings
 A Herança estabelece relações "é-um" (is-a) entre classes, reaproveitando comportamentos compartilhados e especializando implementações:
 
 - **Repositórios de Persistência:**
-  - `CitizenInMemoryRepository(AbstractRepository)` herda de `AbstractRepository` para prover persistência em memória volátil com dados seed.
-  - `CitizenDjangoORMRepository(AbstractRepository)` herda de `AbstractRepository` para prover persistência transacional real no PostgreSQL via Django ORM.
-  - Arquivo: `backend/apps/accounts/repositories.py`.
+  - `CitizenInMemoryRepository(AbstractRepository)` e `CitizenDjangoORMRepository(AbstractRepository)` em `backend/apps/accounts/repositories.py`.
+  - `SchedulingInMemoryRepository(AbstractRepository)` e `SchedulingDjangoORMRepository(AbstractRepository)` em `backend/apps/scheduling/repositories.py`.
+- **Exportadores de Relatórios:**
+  - `CsvExporter(ReportExporter)` e `PdfExporter(ReportExporter)` em `backend/apps/reports/exporters.py`.
 - **Framework Django / DRF:**
   - Todos os models de domínio (`Citizen`, `InternalUser`, `Service`, `Appointment`) herdam de `django.db.models.Model` e `CompositeKeyModel`.
   - Todas as views de API herdam de `rest_framework.views.APIView`.
@@ -59,8 +62,8 @@ O Polimorfismo permite que o sistema trate diferentes implementações de maneir
 
 - **Repositórios Intercambiáveis via Proxy:**
   - `CitizenRepositoryProxy` e `SchedulingRepositoryProxy`:
-    As camadas de serviço (`AccountService`, `SchedulingService`) chamam métodos como `.get_by_id()` ou `.save()` sem saber se o repositório em execução é o repositório em memória (`CitizenInMemoryRepository`) ou o repositório ORM de produção (`CitizenDjangoORMRepository`).
+    As camadas de serviço (`AccountService`, `SchedulingService`) chamam métodos como `.get_by_id()` ou `.save()` sem saber se o repositório em execução é o repositório em memória (`*InMemoryRepository`) ou o repositório ORM de produção (`*DjangoORMRepository`).
   - O sistema responde dinamicamente de acordo com a variável de ambiente `REPOSITORY_BACKEND` ("memory" ou "orm"), comportando-se polimorficamente sem alterar nenhuma linha da camada de serviço.
-- **Exportadores de Relatório:**
-  - Estratégias polimórficas de exportação (`CsvExporter` e `PdfExporter`), ambas respondendo à interface de exportação com formatação especializada.
+- **Exportadores de Relatório (`backend/apps/reports/exporters.py`):**
+  - `ReportsService.create_export` resolve o exportador dinamicamente via `get_report_exporter(export_type)` e invoca `.export(summary)`, `.content_type` e `.build_filename()` polimorficamente sobre a interface `ReportExporter`, gerando CSV UTF-8 (`CsvExporter`) ou PDF 1.4 (`PdfExporter`).
 
